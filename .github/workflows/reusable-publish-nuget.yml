@@ -64,20 +64,7 @@ jobs:
             fi
           done
           
-          # Create SDK versions string for setup-dotnet
-          DOT_NET_VERSIONS=""
-          if [ "$NEEDS_NET6" = "true" ]; then DOT_NET_VERSIONS+="6.0.x\n"; fi
-          if [ "$NEEDS_NET7" = "true" ]; then DOT_NET_VERSIONS+="7.0.x\n"; fi
-          if [ "$NEEDS_NET8" = "true" ]; then DOT_NET_VERSIONS+="8.0.x\n"; fi
-          if [ "$NEEDS_NET9" = "true" ]; then DOT_NET_VERSIONS+="9.0.x\n"; fi
-          if [ "$NEEDS_NET10" = "true" ]; then DOT_NET_VERSIONS+="10.0.x\n"; fi
-          
-          # Remove trailing newline if exists
-          DOT_NET_VERSIONS=$(echo -e "$DOT_NET_VERSIONS" | sed -e 's/\n$//')
-          echo "DOT_NET_VERSIONS<<EOF" >> $GITHUB_ENV
-          echo -e "$DOT_NET_VERSIONS" >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
-          
+          # Output framework detection results
           echo "Frameworks detected:"
           echo "NET6: $NEEDS_NET6"
           echo "NET7: $NEEDS_NET7"
@@ -85,10 +72,35 @@ jobs:
           echo "NET9: $NEEDS_NET9"
           echo "NET10: $NEEDS_NET10"
 
-      - name: Setup required .NET SDKs
+      - name: Setup .NET 6.0 SDK
+        if: env.NEEDS_NET6 == 'true'
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: ${{ env.DOT_NET_VERSIONS }}
+          dotnet-version: '6.0.x'
+
+      - name: Setup .NET 7.0 SDK
+        if: env.NEEDS_NET7 == 'true'
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '7.0.x'
+
+      - name: Setup .NET 8.0 SDK
+        if: env.NEEDS_NET8 == 'true'
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Setup .NET 9.0 SDK
+        if: env.NEEDS_NET9 == 'true'
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Setup .NET 10.0 SDK
+        if: env.NEEDS_NET10 == 'true'
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
 
       - name: Show installed .NET versions
         run: dotnet --list-sdks && dotnet --list-runtimes
