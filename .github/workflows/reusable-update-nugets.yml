@@ -23,7 +23,7 @@ jobs:
       - name: Run update-nuget.ps1
         shell: pwsh
         run: |
-          pwsh ./tools/update-nuget.ps1 -RootDirectory "${{ inputs.root-dir }}"
+          pwsh -File tools/update-nuget.ps1 -RootDirectory "${{ inputs.root-dir }}"
 
       - name: Check for changes
         id: git-check
