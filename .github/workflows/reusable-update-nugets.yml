@@ -20,10 +20,19 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Run update-nuget.ps1
-        shell: pwsh
+      - name: Download update-nuget.ps1 (if missing)
         run: |
-          pwsh -File tools/update-nuget.ps1 -RootDirectory "${{ inputs.root-dir }}"
+            mkdir -p tools
+            curl -fsSL https://raw.githubusercontent.com/Zonit/.github/main/tools/update-nuget.ps1 -o tools/update-nuget.ps1
+
+      - name: List files before PS
+        run: |
+            ls -la
+            ls -la tools
+
+      - name: Update NuGet packages
+        shell: pwsh
+        run: pwsh -File tools/update-nuget.ps1 -RootDirectory "${{ inputs.root-dir }}"
 
       - name: Check for changes
         id: git-check
