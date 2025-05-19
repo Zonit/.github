@@ -20,10 +20,15 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Download update-nuget.ps1
+      - name: Download update-nuget.ps1 with retry
         run: |
             mkdir -p tools
-            curl -fsSL https://raw.githubusercontent.com/Zonit/.github/main/tools/update-nuget.ps1 -o tools/update-nuget.ps1
+            for i in 1 2 3; do
+            curl -fsSL https://raw.githubusercontent.com/Zonit/.github/main/tools/update-nuget.ps1 -o tools/update-nuget.ps1 && break
+            echo "Download failed (attempt $i), retrying in 5s..."
+            sleep 5
+            done
+            test -f tools/update-nuget.ps1
 
       - name: List tools before PowerShell
         run: ls -l tools
