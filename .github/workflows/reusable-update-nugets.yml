@@ -20,17 +20,15 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Download update-nuget.ps1 (if missing)
+      - name: Download update-nuget.ps1
         run: |
             mkdir -p tools
             curl -fsSL https://raw.githubusercontent.com/Zonit/.github/main/tools/update-nuget.ps1 -o tools/update-nuget.ps1
 
-      - name: List files before PS
-        run: |
-            ls -la
-            ls -la tools
+      - name: List tools before PowerShell
+        run: ls -l tools
 
-      - name: Update NuGet packages
+      - name: Run update-nuget
         shell: pwsh
         run: pwsh -File tools/update-nuget.ps1 -RootDirectory "${{ inputs.root-dir }}"
 
