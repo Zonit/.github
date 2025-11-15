@@ -261,7 +261,7 @@ jobs:
         run: |
           # Download the update script from .github repo
           mkdir -p Tools
-          curl -fsSL "https://raw.githubusercontent.com/Zonit/.github/refs/heads/master/Tools/Update-DotNet.ps1" \
+          curl -fsSL "https://raw.githubusercontent.com/Zonit/.github/refs/heads/master/tools/Update-DotNet.ps1" \
             -o Tools/Update-DotNet.ps1
           
           # Run the script with framework list
