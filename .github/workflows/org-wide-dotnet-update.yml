@@ -351,7 +351,6 @@ jobs:
             FRAMEWORKS_SET=$(jq -r '.Summary.FrameworksSet' dotnet-update-report.json 2>/dev/null || echo "N/A")
             CHANGE_SUMMARY_TEXT=$(jq -r '.ChangeSummaryText // ""' dotnet-update-report.json 2>/dev/null || echo "")
             
-            # Build stats section
             cat > /tmp/stats.txt <<'STATS_EOF'
 - **Projects Updated:** PROJECTS_PLACEHOLDER
 - **Packages Configured:** PACKAGES_PLACEHOLDER
@@ -363,7 +362,6 @@ jobs:
 
 STATS_EOF
             
-            # Replace placeholders in stats
             sed -i "s/PROJECTS_PLACEHOLDER/$PROJECTS/g" /tmp/stats.txt
             sed -i "s/PACKAGES_PLACEHOLDER/$PACKAGES/g" /tmp/stats.txt
             sed -i "s/CHANGED_PLACEHOLDER/$CHANGED/g" /tmp/stats.txt
@@ -371,7 +369,6 @@ STATS_EOF
             sed -i "s/FRAMEWORK_SPECIFIC_PLACEHOLDER/$FRAMEWORK_SPECIFIC/g" /tmp/stats.txt
             sed -i "s/FRAMEWORKS_SET_PLACEHOLDER/$FRAMEWORKS_SET/g" /tmp/stats.txt
             
-            # Add detailed package changes if any
             if [[ -n "$CHANGE_SUMMARY_TEXT" && "$CHANGE_SUMMARY_TEXT" != "No package version changes"* ]]; then
               echo "" >> /tmp/stats.txt
               echo "**The following NuGet packages were updated:**" >> /tmp/stats.txt
