@@ -55,7 +55,7 @@ function Get-BestPackageVersion {
         $response = Invoke-RestMethod $url -TimeoutSec 15
         $versions = $response.versions
         
-        if ($TargetFramework -match 'net(\d+)') {
+        if ($TargetFramework -match 'net(\d+)\.?') {
             $targetMajor = [int]$matches[1]
         } else {
             Write-Warning "Cannot extract major version from $TargetFramework"
@@ -215,23 +215,30 @@ try {
     
     # Collect OLD versions before removing
     $oldVersions = @{}
-    $existingItemGroups = @($xml.Project.ItemGroup | Where-Object { $_.Condition -match "TargetFramework" })
+    
+    # Get all ItemGroups (both conditional and unconditional)
+    $existingItemGroups = @($xml.Project.ItemGroup)
+    
     foreach ($ig in $existingItemGroups) {
-        $condition = $ig.Condition
-        if ($condition -match "'.*?' == '(net\d+\.\d+)'") {
-            $framework = $matches[1]
-            foreach ($pv in $ig.PackageVersion) {
-                if ($pv.Include -and $pv.Version) {
-                    $key = "$($pv.Include)|$framework"
-                    $oldVersions[$key] = $pv.Version
+        # Collect versions from conditional ItemGroups
+        if ($ig.Condition -and $ig.Condition -match "TargetFramework") {
+            $condition = $ig.Condition
+            if ($condition -match "'.*?' == '(net\d+\.\d+)'") {
+                $framework = $matches[1]
+                foreach ($pv in $ig.PackageVersion) {
+                    if ($pv.Include -and $pv.Version) {
+                        $key = "$($pv.Include)|$framework"
+                        $oldVersions[$key] = $pv.Version
+                    }
                 }
             }
         }
-    }
-    
-    # Remove existing conditional ItemGroups
-    foreach ($ig in $existingItemGroups) {
-        $xml.Project.RemoveChild($ig) | Out-Null
+        
+        # Remove ItemGroups that contain PackageVersion elements
+        # This removes both conditional and unconditional ItemGroups with package definitions
+        if ($ig.PackageVersion) {
+            $xml.Project.RemoveChild($ig) | Out-Null
+        }
     }
     
     foreach ($tf in $TargetFrameworks) {
