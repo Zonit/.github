@@ -352,15 +352,15 @@ jobs:
             
             # Build stats section
             cat > /tmp/stats.txt << 'STATS_EOF'
-            - **Projects Updated:** PROJECTS_PLACEHOLDER
-            - **Packages Configured:** PACKAGES_PLACEHOLDER
-            - **Package Versions Changed:** CHANGED_PLACEHOLDER
-            - **Common Packages:** COMMON_PACKAGES_PLACEHOLDER
-            - **Framework-Specific Packages:** FRAMEWORK_SPECIFIC_PLACEHOLDER
-            - **Target Frameworks:** `FRAMEWORKS_SET_PLACEHOLDER`
-            - **Central Package Management:** Enabled
+- **Projects Updated:** PROJECTS_PLACEHOLDER
+- **Packages Configured:** PACKAGES_PLACEHOLDER
+- **Package Versions Changed:** CHANGED_PLACEHOLDER
+- **Common Packages:** COMMON_PACKAGES_PLACEHOLDER
+- **Framework-Specific Packages:** FRAMEWORK_SPECIFIC_PLACEHOLDER
+- **Target Frameworks:** `FRAMEWORKS_SET_PLACEHOLDER`
+- **Central Package Management:** Enabled
 
-            STATS_EOF
+STATS_EOF
             
             # Replace placeholders in stats
             sed -i "s/PROJECTS_PLACEHOLDER/$PROJECTS/g" /tmp/stats.txt
@@ -468,7 +468,7 @@ jobs:
           echo "$UPDATED_BODY" > /tmp/updated_issue_body.md
           gh issue edit "$ISSUE_NUMBER" \
             --repo Zonit/.github \
-            --body-file /tmp/updated_issue_body.md"
+            --body-file /tmp/updated_issue_body.md
 
   finalize:
     needs: [discover-repos, update-repos]
