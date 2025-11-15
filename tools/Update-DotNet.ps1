@@ -403,6 +403,9 @@ if ($packageChanges.Count -gt 0) {
     $changeSummary += "No package version changes - this might be a new setup or no updates available"
 }
 
+# Join the summary into a single string for bash compatibility
+$changeSummaryText = $changeSummary -join "`n"
+
 # Generate report for PR automation
 $report = @{
     Timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
@@ -410,7 +413,7 @@ $report = @{
     ProjectsFound = $csprojs.Count
     PackagesFound = $packageList.Count
     PackageChanges = $packageChanges
-    ChangeSummary = $changeSummary
+    ChangeSummaryText = $changeSummaryText
     Summary = @{
         ProjectsUpdated = $csprojs.Count
         PackagesConfigured = $packageList.Count
