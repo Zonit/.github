@@ -242,7 +242,7 @@ try {
     }
     
     foreach ($tf in $TargetFrameworks) {
-        $allowPrerelease = $tf -match 'net1[0-9]'  # Allow prerelease for net10+
+        $allowPrerelease = $tf -match 'net[1-9][0-9]+'  # Allow prerelease for net10+
         
         Write-Host "  Processing $tf..." -ForegroundColor Cyan
         
@@ -315,11 +315,11 @@ if ($packageChanges.Count -gt 0) {
             ($changes | Select-Object -ExpandProperty NewVersion -Unique).Count -eq 1) {
             $old = $changes[0].OldVersion
             $new = $changes[0].NewVersion
-            Write-Host "  $pkg`: $old → $new" -ForegroundColor White
-            $changeSummary += "$pkg`: $old → $new"
+            Write-Host "  $pkg : $old → $new" -ForegroundColor White
+            $changeSummary += "$pkg : $old → $new"
         } else {
             # Different versions per framework
-            Write-Host "  $pkg`:" -ForegroundColor White
+            Write-Host "  $pkg :" -ForegroundColor White
             foreach ($change in $changes) {
                 Write-Host "    [$($change.Framework)] $($change.OldVersion) → $($change.NewVersion)" -ForegroundColor Gray
                 $changeSummary += "$pkg [$($change.Framework)]: $($change.OldVersion) → $($change.NewVersion)"
@@ -344,7 +344,7 @@ $report = @{
         PackagesConfigured = $packageList.Count
         PackagesChanged = $packageChanges.Count
         FrameworksSet = $targetFrameworksString
-        DirectoryPackagesPropsUpdated = $propsFile -ne $null
+        DirectoryPackagesPropsUpdated = [bool]$propsFile
     }
 }
 
