@@ -350,26 +350,34 @@ jobs:
             PROJECTS=$(jq -r '.Summary.ProjectsUpdated' dotnet-update-report.json 2>/dev/null || echo "N/A")
             PACKAGES=$(jq -r '.Summary.PackagesConfigured' dotnet-update-report.json 2>/dev/null || echo "N/A")
             CHANGED=$(jq -r '.Summary.PackagesChanged' dotnet-update-report.json 2>/dev/null || echo "N/A")
-            FRAMEWORKS=$(jq -r '.Summary.FrameworksSet' dotnet-update-report.json 2>/dev/null || echo "N/A")
+            COMMON_PACKAGES=$(jq -r '.Summary.CommonPackages // 0' dotnet-update-report.json 2>/dev/null || echo "0")
+            FRAMEWORK_SPECIFIC=$(jq -r '.Summary.FrameworkSpecificPackages // 0' dotnet-update-report.json 2>/dev/null || echo "0")
+            FRAMEWORKS_SET=$(jq -r '.Summary.FrameworksSet' dotnet-update-report.json 2>/dev/null || echo "N/A")
             
             # Build stats section
-            STATS="- **Projects Updated:** $PROJECTS\n- **Packages Configured:** $PACKAGES\n- **Package Versions Changed:** $CHANGED\n- **Target Frameworks:** \`$FRAMEWORKS\`\n- **Central Package Management:** Enabled\n\n"
+            cat > /tmp/stats.txt << EOF
+- **Projects Updated:** $PROJECTS
+- **Packages Configured:** $PACKAGES
+- **Package Versions Changed:** $CHANGED
+- **Common Packages:** $COMMON_PACKAGES
+- **Framework-Specific Packages:** $FRAMEWORK_SPECIFIC
+- **Target Frameworks:** \`$FRAMEWORKS_SET\`
+- **Central Package Management:** Enabled
+
+EOF
             
             # Add detailed package changes if any
             CHANGE_COUNT=$(jq -r '.ChangeSummary | length' dotnet-update-report.json 2>/dev/null || echo "0")
             if [[ "$CHANGE_COUNT" -gt "0" ]]; then
-              STATS="${STATS}**The following NuGet packages were updated:**\n\n"
-              STATS="${STATS}\`\`\`\n"
-              
-              # Get change summary lines
-              jq -r '.ChangeSummary[]' dotnet-update-report.json 2>/dev/null | while read -r line; do
-                STATS="${STATS}${line}\n"
-              done
-              
-              STATS="${STATS}\`\`\`"
+              echo "**The following NuGet packages were updated:**" >> /tmp/stats.txt
+              echo "" >> /tmp/stats.txt
+              echo '```' >> /tmp/stats.txt
+              jq -r '.ChangeSummary[]' dotnet-update-report.json 2>/dev/null >> /tmp/stats.txt
+              echo '```' >> /tmp/stats.txt
+            else
+              echo "**No package version changes** - packages may have been newly configured" >> /tmp/stats.txt
             fi
             
-            echo -e "$STATS" > /tmp/stats.txt
             sed -i '/STATS_PLACEHOLDER/r /tmp/stats.txt' /tmp/pr_body.md
           else
             echo "- **No report generated** - check workflow logs for details" > /tmp/stats.txt
