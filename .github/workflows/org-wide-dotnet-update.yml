@@ -1,0 +1,454 @@
+﻿name: Organization-Wide .NET Update
+
+# Automatically update .NET framework versions across all repositories in the organization
+
+on:
+  workflow_dispatch:
+    inputs:
+      support-net5:
+        description: 'Support .NET 5.0'
+        type: boolean
+        default: false
+      support-net6:
+        description: 'Support .NET 6.0'
+        type: boolean
+        default: false
+      support-net7:
+        description: 'Support .NET 7.0'
+        type: boolean
+        default: false
+      support-net8:
+        description: 'Support .NET 8.0'
+        type: boolean
+        default: true
+      support-net9:
+        description: 'Support .NET 9.0'
+        type: boolean
+        default: true
+      support-net10:
+        description: 'Support .NET 10.0'
+        type: boolean
+        default: true
+      allow-private-repos:
+        description: 'Include private repositories'
+        type: boolean
+        default: false
+      dry-run:
+        description: 'Dry run (preview only, no changes)'
+        type: boolean
+        default: true
+      exclude-repos:
+        description: 'Comma-separated list of repos to exclude (e.g., repo1,repo2)'
+        type: string
+        required: false
+        default: ''
+
+jobs:
+  discover-repos:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    outputs:
+      dotnet-repos: ${{ steps.find-dotnet-repos.outputs.repos }}
+      tracking-issue-url: ${{ steps.create-tracking-issue.outputs.issue_url }}
+      
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: Find all .NET repositories
+        id: find-dotnet-repos
+        env:
+          GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          echo "?? Scanning organization for .NET repositories..."
+          
+          # Get all repos in organization (filter by visibility if needed)
+          INCLUDE_PRIVATE="${{ inputs.allow-private-repos }}"
+          
+          if [[ "$INCLUDE_PRIVATE" == "true" ]]; then
+            echo "Including private repositories"
+            ALL_REPOS=$(gh repo list Zonit --limit 1000 --json name,isArchived,defaultBranchRef --jq '.[] | select(.isArchived == false) | .name')
+          else
+            echo "Public repositories only"
+            ALL_REPOS=$(gh repo list Zonit --limit 1000 --visibility public --json name,isArchived,defaultBranchRef --jq '.[] | select(.isArchived == false) | .name')
+          fi
+          
+          DOTNET_REPOS=()
+          EXCLUDED_REPOS="${{ inputs.exclude-repos }}"
+          
+          for REPO_NAME in $ALL_REPOS; do
+            # Skip excluded repos
+            if [[ ",$EXCLUDED_REPOS," == *',$REPO_NAME,'* ]]; then
+              echo "??  Skipping excluded: $REPO_NAME"
+              continue
+            fi
+            
+            # Skip .github repo itself
+            if [[ "$REPO_NAME" == ".github" ]]; then
+              continue
+            fi
+            
+            echo "Checking: $REPO_NAME"
+            
+            # Check if repo contains .csproj files
+            HAS_DOTNET=$(gh api "repos/Zonit/$REPO_NAME/git/trees/main?recursive=1" \
+              --jq '.tree[] | select(.path | endswith(".csproj")) | .path' 2>/dev/null || echo "")
+            
+            if [[ -n "$HAS_DOTNET" ]]; then
+              echo "  ? .NET repository detected"
+              DOTNET_REPOS+=("$REPO_NAME")
+            else
+              echo "  ??  Not a .NET repository"
+            fi
+          done
+          
+          # Convert to proper JSON array (no trailing comma)
+          if [ ${#DOTNET_REPOS[@]} -eq 0 ]; then
+            REPOS_JSON="[]"
+          else
+            REPOS_JSON=$(printf '%s\n' "${DOTNET_REPOS[@]}" | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          fi
+          
+          echo "repos=$REPOS_JSON" >> $GITHUB_OUTPUT
+          
+          echo ""
+          echo "?? Summary:"
+          echo "Total .NET repositories found: ${#DOTNET_REPOS[@]}"
+          echo ""
+          echo "Repositories to update:"
+          printf '%s\n' "${DOTNET_REPOS[@]}"
+      
+      - name: Create tracking issue
+        id: create-tracking-issue
+        env:
+          GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          # Build frameworks list
+          FRAMEWORKS=""
+          [[ "${{ inputs.support-net5 }}" == "true" ]] && FRAMEWORKS="${FRAMEWORKS}net5.0, "
+          [[ "${{ inputs.support-net6 }}" == "true" ]] && FRAMEWORKS="${FRAMEWORKS}net6.0, "
+          [[ "${{ inputs.support-net7 }}" == "true" ]] && FRAMEWORKS="${FRAMEWORKS}net7.0, "
+          [[ "${{ inputs.support-net8 }}" == "true" ]] && FRAMEWORKS="${FRAMEWORKS}net8.0, "
+          [[ "${{ inputs.support-net9 }}" == "true" ]] && FRAMEWORKS="${FRAMEWORKS}net9.0, "
+          [[ "${{ inputs.support-net10 }}" == "true" ]] && FRAMEWORKS="${FRAMEWORKS}net10.0, "
+          FRAMEWORKS="${FRAMEWORKS%, }"
+          
+          # Count repos
+          REPO_COUNT=$(echo '${{ steps.find-dotnet-repos.outputs.repos }}' | jq '. | length')
+          
+          ISSUE_TITLE="[Organization Update] .NET Update Across All Repositories"
+          
+          # Create issue body as heredoc to avoid YAML parsing issues
+          cat > /tmp/issue_body.md << 'ISSUE_BODY_EOF'
+          # Organization-Wide .NET Update
+          
+          **Triggered by:** @ACTOR_PLACEHOLDER
+          **Workflow Run:** WORKFLOW_RUN_PLACEHOLDER
+          **Mode:** DRY_RUN_PLACEHOLDER
+          
+          ---
+          
+          ## Configuration
+          
+          **Target Frameworks:** `FRAMEWORKS_PLACEHOLDER`
+          
+          ### Repositories to Update:
+          - **Total:** REPO_COUNT_PLACEHOLDER .NET repositories
+          - **Visibility:** VISIBILITY_PLACEHOLDER
+          
+          ---
+          
+          ## Update Progress
+          
+          | Repository | Status | PR Link |
+          |------------|--------|---------|
+          REPOS_TABLE_PLACEHOLDER
+          
+          ---
+          
+          ## Status Updates
+          
+          Updates will appear below as repositories are processed...
+          
+          ---
+          
+          **Created:** TIMESTAMP_PLACEHOLDER  
+          **Status:** In Progress
+          ISSUE_BODY_EOF
+          
+          # Replace placeholders
+          TIMESTAMP=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
+          sed -i "s/ACTOR_PLACEHOLDER/${{ github.actor }}/g" /tmp/issue_body.md
+          sed -i "s|WORKFLOW_RUN_PLACEHOLDER|https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}|g" /tmp/issue_body.md
+          sed -i "s/DRY_RUN_PLACEHOLDER/${{ inputs.dry-run == 'true' && 'DRY RUN (Preview Only)' || 'LIVE UPDATE' }}/g" /tmp/issue_body.md
+          sed -i "s/FRAMEWORKS_PLACEHOLDER/${FRAMEWORKS}/g" /tmp/issue_body.md
+          sed -i "s/REPO_COUNT_PLACEHOLDER/${REPO_COUNT}/g" /tmp/issue_body.md
+          sed -i "s/TIMESTAMP_PLACEHOLDER/${TIMESTAMP}/g" /tmp/issue_body.md
+          
+          VISIBILITY="${{ inputs.allow-private-repos == 'true' && 'Public + Private' || 'Public only' }}"
+          sed -i "s/VISIBILITY_PLACEHOLDER/${VISIBILITY}/g" /tmp/issue_body.md
+          
+          # Build repos table
+          echo '${{ steps.find-dotnet-repos.outputs.repos }}' | jq -r '.[] | "| \(.) | Pending | - |"' > /tmp/repos_table.txt
+          sed -i '/REPOS_TABLE_PLACEHOLDER/r /tmp/repos_table.txt' /tmp/issue_body.md
+          sed -i '/REPOS_TABLE_PLACEHOLDER/d' /tmp/issue_body.md
+          
+          ISSUE_URL=$(gh issue create \
+            --repo Zonit/.github \
+            --title "$ISSUE_TITLE" \
+            --body-file /tmp/issue_body.md)
+          
+          echo "issue_url=$ISSUE_URL" >> $GITHUB_OUTPUT
+          echo "Created tracking issue: $ISSUE_URL"
+
+  update-repos:
+    needs: discover-repos
+    if: needs.discover-repos.outputs.dotnet-repos != '[]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    strategy:
+      max-parallel: 3
+      fail-fast: false
+      matrix:
+        repo: ${{ fromJson(needs.discover-repos.outputs.dotnet-repos) }}
+    
+    steps:
+      - name: Checkout target repository
+        uses: actions/checkout@v4
+        with:
+          repository: Zonit/${{ matrix.repo }}
+          token: ${{ secrets.ORG_ADMIN_TOKEN || secrets.GITHUB_TOKEN }}
+          path: target-repo
+      
+      - name: Check if repo has .NET projects
+        id: check-dotnet
+        working-directory: target-repo
+        run: |
+          if find . -name "*.csproj" -type f | grep -q .; then
+            echo "has_dotnet=true" >> $GITHUB_OUTPUT
+            echo "? .NET projects found"
+          else
+            echo "has_dotnet=false" >> $GITHUB_OUTPUT
+            echo "??  No .NET projects found"
+          fi
+      
+      - name: Run .NET update
+        if: steps.check-dotnet.outputs.has_dotnet == 'true' && inputs.dry-run == false
+        working-directory: target-repo
+        run: |
+          # Download the update script from .github repo
+          mkdir -p Tools
+          curl -fsSL "https://raw.githubusercontent.com/Zonit/.github/refs/heads/master/Tools/Update-DotNet.ps1" \
+            -o Tools/Update-DotNet.ps1
+          
+          # Run the script with framework list
+          FRAMEWORKS="${{ steps.build-frameworks.outputs.frameworks }}"
+          pwsh -NoProfile -NonInteractive Tools/Update-DotNet.ps1 ${FRAMEWORKS//,/ }
+      
+      - name: Dry run summary
+        if: steps.check-dotnet.outputs.has_dotnet == 'true' && inputs.dry-run == true
+        working-directory: target-repo
+        run: |
+          echo "DRY RUN: Would update ${{ matrix.repo }}"
+          echo "Target frameworks: ${{ steps.build-frameworks.outputs.frameworks }}"
+          echo "✅ Dry run mode - no changes will be made"
+      
+      - name: Cleanup
+        if: always() && inputs.dry-run == false
+        working-directory: target-repo
+        run: |
+          # Keep Tools/Update-DotNet.ps1 for future use
+          # Only remove temporary files
+          echo "✓ Tools/Update-DotNet.ps1 kept for future updates"
+      
+      - name: Check for changes
+        if: steps.check-dotnet.outputs.has_dotnet == 'true' && inputs.dry-run == false
+        id: git-check
+        working-directory: target-repo
+        run: |
+          git add -A
+          if git diff --cached --quiet; then
+            echo "changed=false" >> $GITHUB_OUTPUT
+            echo "No changes in ${{ matrix.repo }}"
+          else
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "Changes detected in ${{ matrix.repo }}"
+          fi
+      
+      - name: Create Pull Request
+        if: steps.check-dotnet.outputs.has_dotnet == 'true' && inputs.dry-run == false && steps.git-check.outputs.changed == 'true'
+        id: create-pr
+        working-directory: target-repo
+        env:
+          GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          BRANCH_NAME="auto/update-dotnet-org-wide"
+          git checkout -b "$BRANCH_NAME"
+          git commit -m "Update .NET to ${{ steps.build-frameworks.outputs.frameworks }}"
+          git push -f origin "$BRANCH_NAME"
+          
+          # Create PR body using heredoc
+          cat > /tmp/pr_body.md << 'PR_BODY_EOF'
+          ### Organization-Wide .NET Update
+          
+          This PR was created as part of an organization-wide .NET update.
+          
+          **Target Frameworks:** `FRAMEWORKS_PLACEHOLDER`
+          
+          **Tracking Issue:** TRACKING_ISSUE_PLACEHOLDER
+          
+          ---
+          
+          #### What Changed:
+          STATS_PLACEHOLDER
+          
+          ---
+          
+          **Next Steps:**
+          1. Review changes
+          2. Run `dotnet restore`
+          3. Run `dotnet build`
+          4. Run tests
+          5. Merge when ready
+          
+          **Part of:** Organization-wide .NET update
+          **Tracking:** TRACKING_ISSUE_PLACEHOLDER
+          PR_BODY_EOF
+          
+          # Replace placeholders
+          sed -i "s|FRAMEWORKS_PLACEHOLDER|${{ steps.build-frameworks.outputs.frameworks }}|g" /tmp/pr_body.md
+          sed -i "s|TRACKING_ISSUE_PLACEHOLDER|${{ needs.discover-repos.outputs.tracking-issue-url }}|g" /tmp/pr_body.md
+          
+          # Add stats if report exists
+          if [[ -f dotnet-update-report.json ]]; then
+            PROJECTS=$(jq -r '.Summary.ProjectsUpdated' dotnet-update-report.json 2>/dev/null || echo "N/A")
+            PACKAGES=$(jq -r '.Summary.PackagesConfigured' dotnet-update-report.json 2>/dev/null || echo "N/A")
+            CHANGED=$(jq -r '.Summary.PackagesChanged' dotnet-update-report.json 2>/dev/null || echo "N/A")
+            FRAMEWORKS=$(jq -r '.Summary.FrameworksSet' dotnet-update-report.json 2>/dev/null || echo "N/A")
+            
+            # Build stats section
+            STATS="- **Projects Updated:** $PROJECTS\n- **Packages Configured:** $PACKAGES\n- **Package Versions Changed:** $CHANGED\n- **Target Frameworks:** \`$FRAMEWORKS\`\n- **Central Package Management:** Enabled\n\n"
+            
+            # Add detailed package changes if any
+            CHANGE_COUNT=$(jq -r '.ChangeSummary | length' dotnet-update-report.json 2>/dev/null || echo "0")
+            if [[ "$CHANGE_COUNT" -gt "0" ]]; then
+              STATS="${STATS}**The following NuGet packages were updated:**\n\n"
+              STATS="${STATS}\`\`\`\n"
+              
+              # Get change summary lines
+              jq -r '.ChangeSummary[]' dotnet-update-report.json 2>/dev/null | while read -r line; do
+                STATS="${STATS}${line}\n"
+              done
+              
+              STATS="${STATS}\`\`\`"
+            fi
+            
+            echo -e "$STATS" > /tmp/stats.txt
+            sed -i '/STATS_PLACEHOLDER/r /tmp/stats.txt' /tmp/pr_body.md
+          else
+            echo "- **No report generated** - check workflow logs for details" > /tmp/stats.txt
+            sed -i '/STATS_PLACEHOLDER/r /tmp/stats.txt' /tmp/pr_body.md
+          fi
+          sed -i '/STATS_PLACEHOLDER/d' /tmp/pr_body.md
+          
+          PR_URL=$(gh pr create \
+            --title "[Org Update] Update .NET to ${{ steps.build-frameworks.outputs.frameworks }}" \
+            --body-file /tmp/pr_body.md \
+            --base master \
+            --head "$BRANCH_NAME")
+          
+          echo "pr_url=$PR_URL" >> $GITHUB_OUTPUT
+          echo "Created PR: $PR_URL"
+      
+      - name: Update tracking issue with PR
+        if: steps.check-dotnet.outputs.has_dotnet == 'true' && inputs.dry-run == false && steps.create-pr.outputs.pr_url != ''
+        env:
+          GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          ISSUE_URL="${{ needs.discover-repos.outputs.tracking-issue-url }}"
+          ISSUE_NUMBER=$(echo "$ISSUE_URL" | grep -oP '\d+$')
+          
+          COMMENT="### ✅ **${{ matrix.repo }}**
+          
+          **Status:** 🎯 Pull Request Created  
+          **PR Link:** ${{ steps.create-pr.outputs.pr_url }}  
+          **Target Frameworks:** \`${{ steps.build-frameworks.outputs.frameworks }}\`
+
+          > 📋 Review the PR and merge when ready."
+          
+          gh issue comment "$ISSUE_NUMBER" \
+            --repo Zonit/.github \
+            --body "$COMMENT"
+      
+      - name: Update tracking issue - no changes
+        if: steps.check-dotnet.outputs.has_dotnet == 'true' && inputs.dry-run == false && steps.git-check.outputs.changed == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          ISSUE_URL="${{ needs.discover-repos.outputs.tracking-issue-url }}"
+          ISSUE_NUMBER=$(echo "$ISSUE_URL" | grep -oP '\d+$')
+          
+          COMMENT="?? **${{ matrix.repo }}** - No changes needed (already up to date)"
+          
+          gh issue comment "$ISSUE_NUMBER" \
+            --repo Zonit/.github \
+            --body "$COMMENT"
+      
+      - name: Update tracking issue - dry run
+        if: steps.check-dotnet.outputs.has_dotnet == 'true' && inputs.dry-run == true
+        env:
+          GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          ISSUE_URL="${{ needs.discover-repos.outputs.tracking-issue-url }}"
+          ISSUE_NUMBER=$(echo "$ISSUE_URL" | grep -oP '\d+$')
+          
+          COMMENT="### 🔍 **${{ matrix.repo }}**
+          
+          **Status:** ✅ Dry run completed  
+          **Would update to:** \`${{ steps.build-frameworks.outputs.frameworks }}\`
+
+          > 💡 This was a preview run. No changes were made to the repository."
+          
+          gh issue comment "$ISSUE_NUMBER" \
+            --repo Zonit/.github \
+            --body "$COMMENT"
+
+  finalize:
+    needs: [discover-repos, update-repos]
+    if: always() && needs.discover-repos.outputs.tracking-issue-url != ''
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    
+    steps:
+      - name: Finalize tracking issue
+        env:
+          GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          ISSUE_URL="${{ needs.discover-repos.outputs.tracking-issue-url }}"
+          ISSUE_NUMBER=$(echo "$ISSUE_URL" | grep -oP '\d+$')
+          
+          # Final comment
+          COMMENT="? Organization-wide .NET update completed."
+          
+          gh issue comment "$ISSUE_NUMBER" \
+            --repo Zonit/.github \
+            --body "$COMMENT"
+          
+          # Update issue title and close
+          gh issue edit "$ISSUE_NUMBER" \
+            --repo Zonit/.github \
+            --title "✅ [Organization Update] .NET Update Across All Repositories - Completed"
+          
+          gh issue close "$ISSUE_NUMBER" \
+            --repo Zonit/.github \
+            --comment "Closure comment"
+        

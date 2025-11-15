@@ -1,0 +1,62 @@
+name: Check NuGet Package Versions and Trigger Publish
+
+on:
+  workflow_call:
+    secrets:
+      GH_TOKEN:
+        required: true
+
+jobs:
+  check-and-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Find all .csproj files
+        id: find_projects
+        run: |
+          echo "projects<<EOF" >> $GITHUB_OUTPUT
+          find Source -name "*.csproj" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Compare local and NuGet versions and trigger publish
+        run: |
+          IFS=$'\n'
+          for proj in ${{ steps.find_projects.outputs.projects }}; do
+            echo "::group::Checking $proj"
+
+            # Extract package name
+            PACKAGE_NAME=$(grep -Eo '<PackageId>.*</PackageId>' "$proj" | sed -E 's/<\/?PackageId>//g')
+            if [ -z "$PACKAGE_NAME" ]; then
+              PACKAGE_NAME=$(basename "$proj" .csproj)
+            fi
+            echo "Package name: $PACKAGE_NAME"
+
+            # Extract local version
+            LOCAL_VERSION=$(grep -Eo '<Version>.*</Version>' "$proj" | sed -E 's/<\/?Version>//g')
+            if [ -z "$LOCAL_VERSION" ]; then
+              LOCAL_VERSION=$(grep -Eo '<AssemblyVersion>.*</AssemblyVersion>' Source/Directory.Packages.props | sed -E 's/<\/?AssemblyVersion>//g')
+            fi
+            echo "Local version: $LOCAL_VERSION"
+
+            # Query NuGet for the latest published version
+            RESPONSE=$(curl -s "https://api.nuget.org/v3-flatcontainer/${PACKAGE_NAME,,}/index.json" || echo "{}")
+            NUGET_VERSION=$(echo "$RESPONSE" | jq -r '.versions[-1]')
+            echo "NuGet published version: $NUGET_VERSION"
+
+            # Compare versions and trigger publish workflow if needed
+            if dpkg --compare-versions "$LOCAL_VERSION" gt "$NUGET_VERSION"; then
+              echo "⬆️ Local version is newer – triggering publish for $PACKAGE_NAME"
+              gh workflow run PublishNuGet.yml
+            else
+              echo "✅ NuGet version is up to date. No publish required."
+            fi
+
+            echo "::endgroup::"
+          done
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
