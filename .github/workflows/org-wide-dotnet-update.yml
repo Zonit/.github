@@ -52,10 +52,28 @@ jobs:
     outputs:
       dotnet-repos: ${{ steps.find-dotnet-repos.outputs.repos }}
       tracking-issue-url: ${{ steps.create-tracking-issue.outputs.issue_url }}
+      frameworks: ${{ steps.build-frameworks.outputs.frameworks }}
       
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      
+      - name: Build frameworks list
+        id: build-frameworks
+        run: |
+          FRAMEWORKS=""
+          [[ "${{ inputs.support-net5 }}" == "true" ]] && FRAMEWORKS="${FRAMEWORKS}net5.0,"
+          [[ "${{ inputs.support-net6 }}" == "true" ]] && FRAMEWORKS="${FRAMEWORKS}net6.0,"
+          [[ "${{ inputs.support-net7 }}" == "true" ]] && FRAMEWORKS="${FRAMEWORKS}net7.0,"
+          [[ "${{ inputs.support-net8 }}" == "true" ]] && FRAMEWORKS="${FRAMEWORKS}net8.0,"
+          [[ "${{ inputs.support-net9 }}" == "true" ]] && FRAMEWORKS="${FRAMEWORKS}net9.0,"
+          [[ "${{ inputs.support-net10 }}" == "true" ]] && FRAMEWORKS="${FRAMEWORKS}net10.0,"
+          
+          # Remove trailing comma
+          FRAMEWORKS="${FRAMEWORKS%,}"
+          
+          echo "frameworks=$FRAMEWORKS" >> $GITHUB_OUTPUT
+          echo "Selected frameworks: $FRAMEWORKS"
       
       - name: Find all .NET repositories
         id: find-dotnet-repos
@@ -247,7 +265,7 @@ jobs:
             -o Tools/Update-DotNet.ps1
           
           # Run the script with framework list
-          FRAMEWORKS="${{ steps.build-frameworks.outputs.frameworks }}"
+          FRAMEWORKS="${{ needs.discover-repos.outputs.frameworks }}"
           pwsh -NoProfile -NonInteractive Tools/Update-DotNet.ps1 ${FRAMEWORKS//,/ }
       
       - name: Dry run summary
@@ -255,7 +273,7 @@ jobs:
         working-directory: target-repo
         run: |
           echo "DRY RUN: Would update ${{ matrix.repo }}"
-          echo "Target frameworks: ${{ steps.build-frameworks.outputs.frameworks }}"
+          echo "Target frameworks: ${{ needs.discover-repos.outputs.frameworks }}"
           echo "✅ Dry run mode - no changes will be made"
       
       - name: Cleanup
@@ -292,7 +310,7 @@ jobs:
           
           BRANCH_NAME="auto/update-dotnet-org-wide"
           git checkout -b "$BRANCH_NAME"
-          git commit -m "Update .NET to ${{ steps.build-frameworks.outputs.frameworks }}"
+          git commit -m "Update .NET to ${{ needs.discover-repos.outputs.frameworks }}"
           git push -f origin "$BRANCH_NAME"
           
           # Create PR body using heredoc
@@ -324,7 +342,7 @@ jobs:
           PR_BODY_EOF
           
           # Replace placeholders
-          sed -i "s|FRAMEWORKS_PLACEHOLDER|${{ steps.build-frameworks.outputs.frameworks }}|g" /tmp/pr_body.md
+          sed -i "s|FRAMEWORKS_PLACEHOLDER|${{ needs.discover-repos.outputs.frameworks }}|g" /tmp/pr_body.md
           sed -i "s|TRACKING_ISSUE_PLACEHOLDER|${{ needs.discover-repos.outputs.tracking-issue-url }}|g" /tmp/pr_body.md
           
           # Add stats if report exists
@@ -360,7 +378,7 @@ jobs:
           sed -i '/STATS_PLACEHOLDER/d' /tmp/pr_body.md
           
           PR_URL=$(gh pr create \
-            --title "[Org Update] Update .NET to ${{ steps.build-frameworks.outputs.frameworks }}" \
+            --title "[Org Update] Update .NET to ${{ needs.discover-repos.outputs.frameworks }}" \
             --body-file /tmp/pr_body.md \
             --base master \
             --head "$BRANCH_NAME")
@@ -380,7 +398,7 @@ jobs:
           
           **Status:** 🎯 Pull Request Created  
           **PR Link:** ${{ steps.create-pr.outputs.pr_url }}  
-          **Target Frameworks:** \`${{ steps.build-frameworks.outputs.frameworks }}\`
+          **Target Frameworks:** \`${{ needs.discover-repos.outputs.frameworks }}\`
 
           > 📋 Review the PR and merge when ready."
           
@@ -413,7 +431,7 @@ jobs:
           COMMENT="### 🔍 **${{ matrix.repo }}**
           
           **Status:** ✅ Dry run completed  
-          **Would update to:** \`${{ steps.build-frameworks.outputs.frameworks }}\`
+          **Would update to:** \`${{ needs.discover-repos.outputs.frameworks }}\`
 
           > 💡 This was a preview run. No changes were made to the repository."
           
