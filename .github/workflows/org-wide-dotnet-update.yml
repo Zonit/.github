@@ -1,4 +1,4 @@
-﻿name: Organization-Wide .NET Update
+name: Organization-Wide .NET Update
 
 # Automatically update .NET framework versions across all repositories in the organization
 
@@ -189,7 +189,7 @@ jobs:
           ---
           
           **Created:** TIMESTAMP_PLACEHOLDER  
-          **Status:** 🔄 In Progress
+          **Status:** ?? In Progress
           ISSUE_BODY_EOF
           
           # Replace placeholders
@@ -270,7 +270,7 @@ jobs:
         run: |
           echo "DRY RUN: Would update ${{ matrix.repo }}"
           echo "Target frameworks: ${{ needs.discover-repos.outputs.frameworks }}"
-          echo "✅ Dry run mode - no changes will be made"
+          echo "? Dry run mode - no changes will be made"
       
       - name: Cleanup
         if: always() && inputs.dry-run == false
@@ -278,7 +278,7 @@ jobs:
         run: |
           # Keep Tools/Update-DotNet.ps1 for future use
           # Only remove temporary files
-          echo "✓ Tools/Update-DotNet.ps1 kept for future updates"
+          echo "? Tools/Update-DotNet.ps1 kept for future updates"
       
       - name: Check for changes
         if: steps.check-dotnet.outputs.has_dotnet == 'true' && inputs.dry-run == false
@@ -352,17 +352,16 @@ jobs:
             CHANGE_SUMMARY_TEXT=$(jq -r '.ChangeSummaryText // ""' dotnet-update-report.json 2>/dev/null || echo "")
             
             # Build stats section
-            # NEXT TIME PLS USE "           " TAB
-            cat > /tmp/stats.txt << 'STATS_EOF'
-           - **Projects Updated:** PROJECTS_PLACEHOLDER
-           - **Packages Configured:** PACKAGES_PLACEHOLDER
-           - **Package Versions Changed:** CHANGED_PLACEHOLDER
-           - **Common Packages:** COMMON_PACKAGES_PLACEHOLDER
-           - **Framework-Specific Packages:** FRAMEWORK_SPECIFIC_PLACEHOLDER
-           - **Target Frameworks:** `FRAMEWORKS_SET_PLACEHOLDER`
-           - **Central Package Management:** Enabled
+            cat > /tmp/stats.txt <<'STATS_EOF'
+- **Projects Updated:** PROJECTS_PLACEHOLDER
+- **Packages Configured:** PACKAGES_PLACEHOLDER
+- **Package Versions Changed:** CHANGED_PLACEHOLDER
+- **Common Packages:** COMMON_PACKAGES_PLACEHOLDER
+- **Framework-Specific Packages:** FRAMEWORK_SPECIFIC_PLACEHOLDER
+- **Target Frameworks:** `FRAMEWORKS_SET_PLACEHOLDER`
+- **Central Package Management:** Enabled
 
-           STATS_EOF
+STATS_EOF
             
             # Replace placeholders in stats
             sed -i "s/PROJECTS_PLACEHOLDER/$PROJECTS/g" /tmp/stats.txt
@@ -417,7 +416,7 @@ jobs:
           PR_LINK="${{ steps.create-pr.outputs.pr_url }}"
           
           # Replace the Pending status with PR link in the table
-          UPDATED_BODY=$(echo "$CURRENT_BODY" | sed "s#| $REPO_NAME | Pending | - |#| $REPO_NAME | 🎯 PR Created | [$REPO_NAME PR]($PR_LINK) |#g")
+          UPDATED_BODY=$(echo "$CURRENT_BODY" | sed "s#| $REPO_NAME | Pending | - |#| $REPO_NAME | ?? PR Created | [$REPO_NAME PR]($PR_LINK) |#g")
           
           # Update issue body
           echo "$UPDATED_BODY" > /tmp/updated_issue_body.md
@@ -440,7 +439,7 @@ jobs:
           REPO_NAME="${{ matrix.repo }}"
           
           # Replace the Pending status with "Up to date"
-          UPDATED_BODY=$(echo "$CURRENT_BODY" | sed "s#| $REPO_NAME | Pending | - |#| $REPO_NAME | ✅ Up to date | - |#g")
+          UPDATED_BODY=$(echo "$CURRENT_BODY" | sed "s#| $REPO_NAME | Pending | - |#| $REPO_NAME | ? Up to date | - |#g")
           
           # Update issue body
           echo "$UPDATED_BODY" > /tmp/updated_issue_body.md
@@ -463,7 +462,7 @@ jobs:
           REPO_NAME="${{ matrix.repo }}"
           
           # Replace the Pending status with "Dry run completed"
-          UPDATED_BODY=$(echo "$CURRENT_BODY" | sed "s#| $REPO_NAME | Pending | - |#| $REPO_NAME | 🔍 Dry run OK | - |#g")
+          UPDATED_BODY=$(echo "$CURRENT_BODY" | sed "s#| $REPO_NAME | Pending | - |#| $REPO_NAME | ?? Dry run OK | - |#g")
           
           # Update issue body
           echo "$UPDATED_BODY" > /tmp/updated_issue_body.md
@@ -500,7 +499,7 @@ jobs:
           
           **Created:** $(echo "$CURRENT_BODY" | grep -oP '(?<=\*\*Created:\*\* ).*(?=  )')
           **Completed:** $COMPLETION_TIME  
-          **Status:** ✅ Completed
+          **Status:** ? Completed
           EOF
           
           # Combine updated body with footer
@@ -511,9 +510,9 @@ jobs:
           gh issue edit "$ISSUE_NUMBER" \
             --repo Zonit/.github \
             --body-file /tmp/final_issue_body.md \
-            --title "✅ [Organization Update] .NET Update Across All Repositories - Completed"
+            --title "? [Organization Update] .NET Update Across All Repositories - Completed"
           
           # Close the issue
           gh issue close "$ISSUE_NUMBER" \
             --repo Zonit/.github \
-            --comment "🎉 Organization-wide .NET update completed successfully. All repositories have been processed. Check the table above for individual PR links."
+            --comment "?? Organization-wide .NET update completed successfully. All repositories have been processed. Check the table above for individual PR links."
