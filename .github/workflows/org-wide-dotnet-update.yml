@@ -351,16 +351,16 @@ jobs:
             FRAMEWORKS_SET=$(jq -r '.Summary.FrameworksSet' dotnet-update-report.json 2>/dev/null || echo "N/A")
             CHANGE_SUMMARY_TEXT=$(jq -r '.ChangeSummaryText // ""' dotnet-update-report.json 2>/dev/null || echo "")
             
-            cat > /tmp/stats.txt <<'STATS_EOF'
-- **Projects Updated:** PROJECTS_PLACEHOLDER
-- **Packages Configured:** PACKAGES_PLACEHOLDER
-- **Package Versions Changed:** CHANGED_PLACEHOLDER
-- **Common Packages:** COMMON_PACKAGES_PLACEHOLDER
-- **Framework-Specific Packages:** FRAMEWORK_SPECIFIC_PLACEHOLDER
-- **Target Frameworks:** `FRAMEWORKS_SET_PLACEHOLDER`
-- **Central Package Management:** Enabled
-
-STATS_EOF
+            {
+              echo "- **Projects Updated:** PROJECTS_PLACEHOLDER"
+              echo "- **Packages Configured:** PACKAGES_PLACEHOLDER"
+              echo "- **Package Versions Changed:** CHANGED_PLACEHOLDER"
+              echo "- **Common Packages:** COMMON_PACKAGES_PLACEHOLDER"
+              echo "- **Framework-Specific Packages:** FRAMEWORK_SPECIFIC_PLACEHOLDER"
+              echo "- **Target Frameworks:** \`FRAMEWORKS_SET_PLACEHOLDER\`"
+              echo "- **Central Package Management:** Enabled"
+              echo ""
+            } > /tmp/stats.txt
             
             sed -i "s/PROJECTS_PLACEHOLDER/$PROJECTS/g" /tmp/stats.txt
             sed -i "s/PACKAGES_PLACEHOLDER/$PACKAGES/g" /tmp/stats.txt
