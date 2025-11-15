@@ -162,8 +162,8 @@ jobs:
           cat > /tmp/issue_body.md << 'ISSUE_BODY_EOF'
           # Organization-Wide .NET Update
           
-          **Triggered by:** @ACTOR_PLACEHOLDER
-          **Workflow Run:** WORKFLOW_RUN_PLACEHOLDER
+          **Triggered by:** @ACTOR_PLACEHOLDER  
+          **Workflow Run:** WORKFLOW_RUN_PLACEHOLDER  
           **Mode:** DRY_RUN_PLACEHOLDER
           
           ---
@@ -180,20 +180,16 @@ jobs:
           
           ## Update Progress
           
+          The table below shows real-time progress. It will be updated automatically as repositories are processed.
+          
           | Repository | Status | PR Link |
           |------------|--------|---------|
           REPOS_TABLE_PLACEHOLDER
           
           ---
           
-          ## Status Updates
-          
-          Updates will appear below as repositories are processed...
-          
-          ---
-          
           **Created:** TIMESTAMP_PLACEHOLDER  
-          **Status:** In Progress
+          **Status:** 🔄 In Progress
           ISSUE_BODY_EOF
           
           # Replace placeholders
@@ -356,15 +352,15 @@ jobs:
             
             # Build stats section
             cat > /tmp/stats.txt << EOF
-- **Projects Updated:** $PROJECTS
-- **Packages Configured:** $PACKAGES
-- **Package Versions Changed:** $CHANGED
-- **Common Packages:** $COMMON_PACKAGES
-- **Framework-Specific Packages:** $FRAMEWORK_SPECIFIC
-- **Target Frameworks:** \`$FRAMEWORKS_SET\`
-- **Central Package Management:** Enabled
+            - **Projects Updated:** $PROJECTS
+            - **Packages Configured:** $PACKAGES
+            - **Package Versions Changed:** $CHANGED
+            - **Common Packages:** $COMMON_PACKAGES
+            - **Framework-Specific Packages:** $FRAMEWORK_SPECIFIC
+            - **Target Frameworks:** \`$FRAMEWORKS_SET\`
+            - **Central Package Management:** Enabled
 
-EOF
+            EOF
             
             # Add detailed package changes if any
             CHANGE_COUNT=$(jq -r '.ChangeSummary | length' dotnet-update-report.json 2>/dev/null || echo "0")
@@ -402,17 +398,21 @@ EOF
           ISSUE_URL="${{ needs.discover-repos.outputs.tracking-issue-url }}"
           ISSUE_NUMBER=$(echo "$ISSUE_URL" | grep -oP '\d+$')
           
-          COMMENT="### ✅ **${{ matrix.repo }}**
+          # Get current issue body
+          CURRENT_BODY=$(gh issue view "$ISSUE_NUMBER" --repo Zonit/.github --json body --jq '.body')
           
-          **Status:** 🎯 Pull Request Created  
-          **PR Link:** ${{ steps.create-pr.outputs.pr_url }}  
-          **Target Frameworks:** \`${{ needs.discover-repos.outputs.frameworks }}\`
-
-          > 📋 Review the PR and merge when ready."
+          # Update the table row for this repository
+          REPO_NAME="${{ matrix.repo }}"
+          PR_LINK="${{ steps.create-pr.outputs.pr_url }}"
           
-          gh issue comment "$ISSUE_NUMBER" \
+          # Replace the Pending status with PR link in the table
+          UPDATED_BODY=$(echo "$CURRENT_BODY" | sed "s#| $REPO_NAME | Pending | - |#| $REPO_NAME | 🎯 PR Created | [$REPO_NAME PR]($PR_LINK) |#g")
+          
+          # Update issue body
+          echo "$UPDATED_BODY" > /tmp/updated_issue_body.md
+          gh issue edit "$ISSUE_NUMBER" \
             --repo Zonit/.github \
-            --body "$COMMENT"
+            --body-file /tmp/updated_issue_body.md
       
       - name: Update tracking issue - no changes
         if: steps.check-dotnet.outputs.has_dotnet == 'true' && inputs.dry-run == false && steps.git-check.outputs.changed == 'false'
@@ -422,11 +422,20 @@ EOF
           ISSUE_URL="${{ needs.discover-repos.outputs.tracking-issue-url }}"
           ISSUE_NUMBER=$(echo "$ISSUE_URL" | grep -oP '\d+$')
           
-          COMMENT="?? **${{ matrix.repo }}** - No changes needed (already up to date)"
+          # Get current issue body
+          CURRENT_BODY=$(gh issue view "$ISSUE_NUMBER" --repo Zonit/.github --json body --jq '.body')
           
-          gh issue comment "$ISSUE_NUMBER" \
+          # Update the table row for this repository
+          REPO_NAME="${{ matrix.repo }}"
+          
+          # Replace the Pending status with "Up to date"
+          UPDATED_BODY=$(echo "$CURRENT_BODY" | sed "s#| $REPO_NAME | Pending | - |#| $REPO_NAME | ✅ Up to date | - |#g")
+          
+          # Update issue body
+          echo "$UPDATED_BODY" > /tmp/updated_issue_body.md
+          gh issue edit "$ISSUE_NUMBER" \
             --repo Zonit/.github \
-            --body "$COMMENT"
+            --body-file /tmp/updated_issue_body.md
       
       - name: Update tracking issue - dry run
         if: steps.check-dotnet.outputs.has_dotnet == 'true' && inputs.dry-run == true
@@ -436,16 +445,20 @@ EOF
           ISSUE_URL="${{ needs.discover-repos.outputs.tracking-issue-url }}"
           ISSUE_NUMBER=$(echo "$ISSUE_URL" | grep -oP '\d+$')
           
-          COMMENT="### 🔍 **${{ matrix.repo }}**
+          # Get current issue body
+          CURRENT_BODY=$(gh issue view "$ISSUE_NUMBER" --repo Zonit/.github --json body --jq '.body')
           
-          **Status:** ✅ Dry run completed  
-          **Would update to:** \`${{ needs.discover-repos.outputs.frameworks }}\`
-
-          > 💡 This was a preview run. No changes were made to the repository."
+          # Update the table row for this repository
+          REPO_NAME="${{ matrix.repo }}"
           
-          gh issue comment "$ISSUE_NUMBER" \
+          # Replace the Pending status with "Dry run completed"
+          UPDATED_BODY=$(echo "$CURRENT_BODY" | sed "s#| $REPO_NAME | Pending | - |#| $REPO_NAME | 🔍 Dry run OK | - |#g")
+          
+          # Update issue body
+          echo "$UPDATED_BODY" > /tmp/updated_issue_body.md
+          gh issue edit "$ISSUE_NUMBER" \
             --repo Zonit/.github \
-            --body "$COMMENT"
+            --body-file /tmp/updated_issue_body.md"
 
   finalize:
     needs: [discover-repos, update-repos]
@@ -462,19 +475,34 @@ EOF
           ISSUE_URL="${{ needs.discover-repos.outputs.tracking-issue-url }}"
           ISSUE_NUMBER=$(echo "$ISSUE_URL" | grep -oP '\d+$')
           
-          # Final comment
-          COMMENT="? Organization-wide .NET update completed."
+          # Get current issue body
+          CURRENT_BODY=$(gh issue view "$ISSUE_NUMBER" --repo Zonit/.github --json body --jq '.body')
           
-          gh issue comment "$ISSUE_NUMBER" \
-            --repo Zonit/.github \
-            --body "$COMMENT"
+          # Remove "Status Updates" section and everything after it until "Created:"
+          UPDATED_BODY=$(echo "$CURRENT_BODY" | sed '/## Status Updates/,/^---$/d')
           
-          # Update issue title and close
+          # Add completion footer
+          COMPLETION_TIME=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
+          cat > /tmp/completion_footer.md << EOF
+          
+          ---
+          
+          **Created:** $(echo "$CURRENT_BODY" | grep -oP '(?<=\*\*Created:\*\* ).*(?=  )')
+          **Completed:** $COMPLETION_TIME  
+          **Status:** ✅ Completed
+          EOF
+          
+          # Combine updated body with footer
+          echo "$UPDATED_BODY" > /tmp/final_issue_body.md
+          cat /tmp/completion_footer.md >> /tmp/final_issue_body.md
+          
+          # Update issue with final body
           gh issue edit "$ISSUE_NUMBER" \
             --repo Zonit/.github \
+            --body-file /tmp/final_issue_body.md \
             --title "✅ [Organization Update] .NET Update Across All Repositories - Completed"
           
+          # Close the issue
           gh issue close "$ISSUE_NUMBER" \
             --repo Zonit/.github \
-            --comment "Closure comment"
-        
+            --comment "🎉 Organization-wide .NET update completed successfully. All repositories have been processed. Check the table above for individual PR links."
