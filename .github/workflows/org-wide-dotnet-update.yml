@@ -352,16 +352,17 @@ jobs:
             CHANGE_SUMMARY_TEXT=$(jq -r '.ChangeSummaryText // ""' dotnet-update-report.json 2>/dev/null || echo "")
             
             # Build stats section
+            # NEXT TIME PLS USE "           " TAB
             cat > /tmp/stats.txt << 'STATS_EOF'
-- **Projects Updated:** PROJECTS_PLACEHOLDER
-- **Packages Configured:** PACKAGES_PLACEHOLDER
-- **Package Versions Changed:** CHANGED_PLACEHOLDER
-- **Common Packages:** COMMON_PACKAGES_PLACEHOLDER
-- **Framework-Specific Packages:** FRAMEWORK_SPECIFIC_PLACEHOLDER
-- **Target Frameworks:** `FRAMEWORKS_SET_PLACEHOLDER`
-- **Central Package Management:** Enabled
+           - **Projects Updated:** PROJECTS_PLACEHOLDER
+           - **Packages Configured:** PACKAGES_PLACEHOLDER
+           - **Package Versions Changed:** CHANGED_PLACEHOLDER
+           - **Common Packages:** COMMON_PACKAGES_PLACEHOLDER
+           - **Framework-Specific Packages:** FRAMEWORK_SPECIFIC_PLACEHOLDER
+           - **Target Frameworks:** `FRAMEWORKS_SET_PLACEHOLDER`
+           - **Central Package Management:** Enabled
 
-STATS_EOF
+           STATS_EOF
             
             # Replace placeholders in stats
             sed -i "s/PROJECTS_PLACEHOLDER/$PROJECTS/g" /tmp/stats.txt
