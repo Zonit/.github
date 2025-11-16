@@ -83,7 +83,7 @@ function Test-RequiresPrerelease {
         $needsPrerelease = @($stableVersionsExist).Count -eq 0
         
         if ($needsPrerelease) {
-            Write-Host "  ℹ️  $TargetFramework appears to be prerelease - will allow preview packages" -ForegroundColor Yellow
+            Write-Host "  [INFO] $TargetFramework appears to be prerelease - will allow preview packages" -ForegroundColor Yellow
         }
         
         return $needsPrerelease
@@ -206,9 +206,9 @@ foreach ($proj in $csprojs) {
         $pg.AppendChild($tfNode) | Out-Null
         
         $xml.Save($proj.FullName)
-        Write-Host "  ✓ $($proj.Name): Set to $targetFrameworksString" -ForegroundColor Green
+        Write-Host "  [OK] $($proj.Name): Set to $targetFrameworksString" -ForegroundColor Green
     } catch {
-        Write-Warning "  ✗ Failed to update $($proj.Name): $_"
+        Write-Warning "  [FAIL] Failed to update $($proj.Name): $_"
     }
 }
 
@@ -222,9 +222,9 @@ foreach ($proj in $csprojs) {
         $content = Get-Content $proj.FullName -Raw
         $content = $content -replace '(<PackageReference\s+Include="[^"]+")(\s+Version="[^"]+")', '$1'
         $content | Set-Content $proj.FullName -NoNewline
-        Write-Host "  ✓ $($proj.Name)" -ForegroundColor Gray
+        Write-Host "  [OK] $($proj.Name)" -ForegroundColor Gray
     } catch {
-        Write-Warning "  ✗ Failed to process $($proj.Name): $_"
+        Write-Warning "  [FAIL] Failed to process $($proj.Name): $_"
     }
 }
 
@@ -250,7 +250,7 @@ foreach ($proj in $csprojs) {
             }
         }
     } catch {
-        Write-Warning "  ✗ Failed to read packages from $($proj.Name): $_"
+        Write-Warning "  [FAIL] Failed to read packages from $($proj.Name): $_"
     }
 }
 
@@ -382,13 +382,13 @@ try {
                 if ($oldVersions.ContainsKey($oldKey)) {
                     $preservedVersion = $oldVersions[$oldKey]
                     $packageVersionsByFramework[$tf][$packageId] = $preservedVersion
-                    Write-Host "    ⚠️  $packageId: Could not resolve new version, preserving old version $preservedVersion for $tf" -ForegroundColor Yellow
+                    Write-Host "    [WARN] $packageId`: Could not resolve new version, preserving old version $preservedVersion for $tf" -ForegroundColor Yellow
                 } elseif ($oldVersions.ContainsKey($oldCommonKey)) {
                     $preservedVersion = $oldVersions[$oldCommonKey]
                     $packageVersionsByFramework[$tf][$packageId] = $preservedVersion
-                    Write-Host "    ⚠️  $packageId: Could not resolve new version, preserving old version $preservedVersion for $tf" -ForegroundColor Yellow
+                    Write-Host "    [WARN] $packageId`: Could not resolve new version, preserving old version $preservedVersion for $tf" -ForegroundColor Yellow
                 } else {
-                    Write-Warning "    ✗ $packageId: Could not resolve version and no old version to preserve for $tf"
+                    Write-Warning "    [ERROR] $packageId`: Could not resolve version and no old version to preserve for $tf"
                 }
             }
             Start-Sleep -Milliseconds 100
@@ -397,7 +397,7 @@ try {
     
     # Warn about unresolved packages
     if ($unresolvedPackages.Count -gt 0) {
-        Write-Host "`n  ⚠️  Warning: Some packages could not be resolved from NuGet:" -ForegroundColor Yellow
+        Write-Host "`n  [WARN] Warning: Some packages could not be resolved from NuGet:" -ForegroundColor Yellow
         foreach ($pkg in $unresolvedPackages.Keys) {
             $frameworks = $unresolvedPackages[$pkg] -join ', '
             Write-Host "    - $pkg (for: $frameworks)" -ForegroundColor Yellow
@@ -406,8 +406,7 @@ try {
     
     # Determine which packages can use a common version
     $commonPackages = @{}
-    $frameworkSpecificPackages = @{
-    }
+    $frameworkSpecificPackages = @{}
     
     foreach ($packageId in $packageList) {
         $versions = @()
@@ -502,7 +501,7 @@ try {
             $changeLabel = if ($oldVersion -and $oldVersion -ne $version) { " (was $oldVersion)" } else { "" }
             $childLabel = if ($packageChildElements.ContainsKey($attrKey)) { " [+children]" } else { "" }
             $attrLabel = if ($packageAttributes.ContainsKey($attrKey)) { " [+attrs]" } else { "" }
-            Write-Host "    - $packageId → $version$prereleaseLabel$changeLabel$attrLabel$childLabel" -ForegroundColor Gray
+            Write-Host "    - $packageId -> $version$prereleaseLabel$changeLabel$attrLabel$childLabel" -ForegroundColor Gray
         }
         
         if ($itemGroup.HasChildNodes) {
@@ -597,7 +596,7 @@ try {
                     $changeLabel = if ($oldVersion -and $oldVersion -ne $version) { " (was $oldVersion)" } else { "" }
                     $childLabel = if ($packageChildElements.ContainsKey($childKey) -or $packageChildElements.ContainsKey($childCommonKey)) { " [+children]" } else { "" }
                     $attrLabel = if ($packageAttributes.ContainsKey($attrKey) -or $packageAttributes.ContainsKey($attrCommonKey)) { " [+attrs]" } else { "" }
-                    Write-Host "    [$tf] $packageId → $version$prereleaseLabel$changeLabel$attrLabel$childLabel" -ForegroundColor DarkGray
+                    Write-Host "    [$tf] $packageId -> $version$prereleaseLabel$changeLabel$attrLabel$childLabel" -ForegroundColor DarkGray
                 }
             }
             
@@ -608,7 +607,7 @@ try {
     }
     
     $xml.Save($propsFile.FullName)
-    Write-Host "  ✓ Saved Directory.Packages.props" -ForegroundColor Green
+    Write-Host "  [OK] Saved Directory.Packages.props" -ForegroundColor Green
     Write-Host "    Common packages: $($commonPackages.Count)" -ForegroundColor Gray
     Write-Host "    Framework-specific packages: $($frameworkSpecificPackages.Count)" -ForegroundColor Gray
     
@@ -621,7 +620,7 @@ try {
 # SUMMARY
 # ============================================================================
 Write-Host "`n========================================" -ForegroundColor Green
-Write-Host "✓ Update Complete!" -ForegroundColor Green
+Write-Host "[OK] Update Complete!" -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Green
 
 # Generate detailed change summary
@@ -640,14 +639,14 @@ if ($packageChanges.Count -gt 0) {
             ($changes | Select-Object -ExpandProperty NewVersion -Unique).Count -eq 1) {
             $old = $changes[0].OldVersion
             $new = $changes[0].NewVersion
-            Write-Host "  $pkg : $old → $new" -ForegroundColor White
-            $changeSummary += "$pkg : $old → $new"
+            Write-Host "  $pkg : $old -> $new" -ForegroundColor White
+            $changeSummary += "$pkg : $old -> $new"
         } else {
             # Different versions per framework
             Write-Host "  $pkg :" -ForegroundColor White
             foreach ($change in $changes) {
-                Write-Host "    [$($change.Framework)] $($change.OldVersion) → $($change.NewVersion)" -ForegroundColor Gray
-                $changeSummary += "$pkg [$($change.Framework)]: $($change.OldVersion) → $($change.NewVersion)"
+                Write-Host "    [$($change.Framework)] $($change.OldVersion) -> $($change.NewVersion)" -ForegroundColor Gray
+                $changeSummary += "$pkg [$($change.Framework)]: $($change.OldVersion) -> $($change.NewVersion)"
             }
         }
     }
