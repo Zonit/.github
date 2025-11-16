@@ -307,7 +307,7 @@ try {
         # Collect versions and attributes from all ItemGroups
         foreach ($pv in $ig.PackageVersion) {
             if ($pv.Include -and $pv.Version) {
-                if ($ig.Condition -and $ig.Condition -match "'\`\$\(TargetFramework\)' == '(net\d+\.\d+)'") {
+                if ($ig.Condition -and $ig.Condition -match '"\$\(TargetFramework\)" == "(net\d+\.\d+)"') {
                     $framework = $matches[1]
                     $key = "$($pv.Include)|$framework"
                 } else {
@@ -346,7 +346,7 @@ try {
         Write-Host "  Resolving versions for $tf..." -ForegroundColor Cyan
         
         foreach ($packageId in $packageList) {
-            # Always fetch latest version from NuGet
+            # Fetch best compatible version from NuGet based on framework requirements
             $version = Get-BestPackageVersion -PackageId $packageId -TargetFramework $tf -AllowPrerelease $allowPrereleaseForFramework
             if ($version) {
                 $packageVersionsByFramework[$tf][$packageId] = $version
@@ -372,7 +372,7 @@ try {
         if ($uniqueVersions.Count -eq 1 -and $uniqueVersions[0]) {
             # All frameworks use the same version
             $commonPackages[$packageId] = $uniqueVersions[0]
-        } elseif ($uniqueVersions.Count -gt 0) {
+        } elseif ($uniqueVersions.Count -gt 0 -and $uniqueVersions[0]) {
             # Different versions per framework
             $frameworkSpecificPackages[$packageId] = $true
         }
@@ -565,8 +565,8 @@ if ($packageChanges.Count -gt 0) {
             # Different versions per framework
             Write-Host "  $pkg :" -ForegroundColor White
             foreach ($change in $changes) {
-                Write-Host "    [$($change.Framework)] $($change.OldVersion) → $($change.NewVersion)" -ForegroundColor Gray
-                $changeSummary += "$pkg [$($change.Framework)]: $($change.OldVersion) → $($change.NewVersion)"
+                Write-Host "    [$($(change.Framework))] $($(change.OldVersion)) → $($(change.NewVersion))" -ForegroundColor Gray
+                $changeSummary += "$pkg [$($(change.Framework))]: $($(change.OldVersion)) → $($(change.NewVersion))"
             }
         }
     }
