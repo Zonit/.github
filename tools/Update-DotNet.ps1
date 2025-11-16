@@ -426,11 +426,12 @@ try {
                 }
             }
             
-            if ($oldVersion -and $oldVersion -ne $version) {
+            # Track changes: both version updates AND new additions
+            if (-not $oldVersion -or $oldVersion -ne $version) {
                 $packageChanges += [PSCustomObject]@{
                     Package = $packageId
                     Framework = "all"
-                    OldVersion = $oldVersion
+                    OldVersion = if ($oldVersion) { $oldVersion } else { "(new)" }
                     NewVersion = $version
                 }
             }
@@ -502,11 +503,12 @@ try {
                         }
                     }
                     
-                    if ($oldVersion -and $oldVersion -ne $version) {
+                    # Track changes: both version updates AND new additions
+                    if (-not $oldVersion -or $oldVersion -ne $version) {
                         $packageChanges += [PSCustomObject]@{
                             Package = $packageId
                             Framework = $tf
-                            OldVersion = $oldVersion
+                            OldVersion = if ($oldVersion) { $oldVersion } else { "(new)" }
                             NewVersion = $version
                         }
                     }
