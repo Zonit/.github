@@ -406,9 +406,26 @@ try {
             
             $itemGroup.AppendChild($pkgVersion) | Out-Null
             
-            # Track changes
+            # Track changes - check both common key and all framework-specific keys
+            $oldVersion = $null
             $oldKey = "$packageId|common"
-            $oldVersion = $oldVersions[$oldKey]
+            
+            # First try to find old version in common configuration
+            if ($oldVersions.ContainsKey($oldKey)) {
+                $oldVersion = $oldVersions[$oldKey]
+            }
+            
+            # If not found in common, check all framework-specific configurations
+            if (-not $oldVersion) {
+                foreach ($tf in $TargetFrameworks) {
+                    $fwKey = "$packageId|$tf"
+                    if ($oldVersions.ContainsKey($fwKey)) {
+                        $oldVersion = $oldVersions[$fwKey]
+                        break  # Use first found version
+                    }
+                }
+            }
+            
             if ($oldVersion -and $oldVersion -ne $version) {
                 $packageChanges += [PSCustomObject]@{
                     Package = $packageId
@@ -468,9 +485,23 @@ try {
                     $itemGroup.AppendChild($pkgVersion) | Out-Null
                     $hasPackages = $true
                     
-                    # Track changes
+                    # Track changes - check both framework-specific key and common key
+                    $oldVersion = $null
                     $oldKey = "$packageId|$tf"
-                    $oldVersion = $oldVersions[$oldKey]
+                    
+                    # First try to find old version in framework-specific configuration
+                    if ($oldVersions.ContainsKey($oldKey)) {
+                        $oldVersion = $oldVersions[$oldKey]
+                    }
+                    
+                    # If not found, check common configuration
+                    if (-not $oldVersion) {
+                        $commonKey = "$packageId|common"
+                        if ($oldVersions.ContainsKey($commonKey)) {
+                            $oldVersion = $oldVersions[$commonKey]
+                        }
+                    }
+                    
                     if ($oldVersion -and $oldVersion -ne $version) {
                         $packageChanges += [PSCustomObject]@{
                             Package = $packageId
