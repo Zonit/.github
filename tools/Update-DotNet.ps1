@@ -238,7 +238,7 @@ try {
     $existingItemGroups = @($xml.Project.ItemGroup)
     
     foreach ($ig in $existingItemGroups) {
-        # Collect versions from all ItemGroups
+        # Collect versions from all ItemGroups - preserve existing versions
         foreach ($pv in $ig.PackageVersion) {
             if ($pv.Include -and $pv.Version) {
                 if ($ig.Condition -and $ig.Condition -match "'.*?' == '(net\d+\.\d+)'") {
@@ -262,16 +262,34 @@ try {
     $packageVersionsByFramework = @{}
     foreach ($tf in $TargetFrameworks) {
         $allowPrerelease = $tf -match 'net[1-9][0-9]+'
-        $packageVersionsByFramework[$tf] = @{}
+        $packageVersionsByFramework[$tf] = @{
         
         Write-Host "  Resolving versions for $tf..." -ForegroundColor Cyan
         
         foreach ($packageId in $packageList) {
-            $version = Get-BestPackageVersion -PackageId $packageId -TargetFramework $tf -AllowPrerelease $allowPrerelease
-            if ($version) {
-                $packageVersionsByFramework[$tf][$packageId] = $version
+            # First check if we have an existing version for this framework
+            $existingKey = "$packageId|$tf"
+            $existingCommonKey = "$packageId|common"
+            
+            $existingVersion = $null
+            if ($oldVersions.ContainsKey($existingKey)) {
+                $existingVersion = $oldVersions[$existingKey]
+            } elseif ($oldVersions.ContainsKey($existingCommonKey)) {
+                $existingVersion = $oldVersions[$existingCommonKey]
             }
-            Start-Sleep -Milliseconds 100
+            
+            # If we have an existing valid version, use it
+            if ($existingVersion -and $existingVersion -ne "0") {
+                $packageVersionsByFramework[$tf][$packageId] = $existingVersion
+                Write-Verbose "Using existing version for ${packageId}: $existingVersion"
+            } else {
+                # Otherwise fetch from NuGet
+                $version = Get-BestPackageVersion -PackageId $packageId -TargetFramework $tf -AllowPrerelease $allowPrerelease
+                if ($version) {
+                    $packageVersionsByFramework[$tf][$packageId] = $version
+                }
+                Start-Sleep -Milliseconds 100
+            }
         }
     }
     
