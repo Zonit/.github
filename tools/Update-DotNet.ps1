@@ -113,13 +113,7 @@ function Get-BestPackageVersion {
             return $null
         }
         
-        if ($TargetFramework -match 'net(\d+)\.?') {
-            $targetMajor = [int]$matches[1]
-        } else {
-            Write-Warning "Cannot extract major version from $TargetFramework"
-            return $null
-        }
-        
+        # Parse all versions
         $allVersions = $versions | ForEach-Object {
             try {
                 $v = [version]($_ -replace '-.*', '')
@@ -139,26 +133,19 @@ function Get-BestPackageVersion {
             return $null
         }
         
-        # Strategy (priority order):
-        # 1. Latest stable with exact major version (semantic version, not major-only)
-        # 2. Latest stable with lower major version
-        # 3. Latest prerelease with exact major (if AllowPrerelease)
-        # Never use major-only versions like "6" or "9" - always use semantic versions
+        # Improved strategy: Find latest compatible version regardless of version numbering scheme
+        # Priority order:
+        # 1. Latest stable version (if not AllowPrerelease)
+        # 2. Latest version including prerelease (if AllowPrerelease)
         
-        $best = $allVersions | Where-Object { 
-            -not $_.IsPrerelease -and $_.Version.Major -eq $targetMajor 
-        } | Sort-Object -Property @{Expression={$_.Version}; Descending=$true} | Select-Object -First 1
+        $best = $null
         
-        if (-not $best) {
-            $best = $allVersions | Where-Object { 
-                -not $_.IsPrerelease -and $_.Version.Major -lt $targetMajor 
-            } | Sort-Object -Property @{Expression={$_.Version}; Descending=$true} | Select-Object -First 1
-        }
-        
-        if (-not $best -and $AllowPrerelease) {
-            $best = $allVersions | Where-Object { 
-                $_.Version.Major -eq $targetMajor 
-            } | Sort-Object -Property @{Expression={$_.Version}; Descending=$true} | Select-Object -First 1
+        if ($AllowPrerelease) {
+            # Allow any version (stable or prerelease)
+            $best = $allVersions | Sort-Object -Property @{Expression={$_.Version}; Descending=$true} | Select-Object -First 1
+        } else {
+            # Only stable versions
+            $best = $allVersions | Where-Object { -not $_.IsPrerelease } | Sort-Object -Property @{Expression={$_.Version}; Descending=$true} | Select-Object -First 1
         }
         
         if (-not $best) {
@@ -296,15 +283,25 @@ $frameworkSpecificPackages = @{}
 try {
     [xml]$xml = Get-Content $propsFile.FullName
     
-    # Collect OLD versions and attributes before removing
+    # Remove TargetFrameworks from PropertyGroup if it exists (it should only be in .csproj files)
+    $propertyGroups = @($xml.Project.PropertyGroup)
+    foreach ($pg in $propertyGroups) {
+        if ($pg) {
+            @($pg.SelectNodes("TargetFramework")) | ForEach-Object { $pg.RemoveChild($_) | Out-Null }
+            @($pg.SelectNodes("TargetFrameworks")) | ForEach-Object { $pg.RemoveChild($_) | Out-Null }
+        }
+    }
+    
+    # Collect OLD versions and ALL child elements/attributes before removing
     $oldVersions = @{}
     $packageAttributes = @{}
+    $packageChildElements = @{}
     
     # Get all ItemGroups (both conditional and unconditional)
     $existingItemGroups = @($xml.Project.ItemGroup)
     
     foreach ($ig in $existingItemGroups) {
-        # Collect versions and attributes from all ItemGroups
+        # Collect versions, attributes, and child elements from all ItemGroups
         foreach ($pv in $ig.PackageVersion) {
             if ($pv.Include -and $pv.Version) {
                 if ($ig.Condition -and $ig.Condition -match "'\`$\(TargetFramework\)' == '(net\d+\.\d+)'") {
@@ -325,6 +322,20 @@ try {
                 if ($attrs.Count -gt 0) {
                     $packageAttributes[$key] = $attrs
                 }
+                
+                # Store all child elements (like PrivateAssets, IncludeAssets, etc.)
+                $childElements = @()
+                foreach ($child in $pv.ChildNodes) {
+                    if ($child.NodeType -eq 'Element') {
+                        $childElements += [PSCustomObject]@{
+                            Name = $child.LocalName
+                            Value = $child.InnerText
+                        }
+                    }
+                }
+                if ($childElements.Count -gt 0) {
+                    $packageChildElements[$key] = $childElements
+                }
             }
         }
         
@@ -337,6 +348,8 @@ try {
     
     # Collect package versions for each framework
     $packageVersionsByFramework = @{}
+    $unresolvedPackages = @{}
+    
     foreach ($tf in $TargetFrameworks) {
         # Auto-detect if framework requires prerelease packages
         $allowPrereleaseForFramework = Test-RequiresPrerelease -TargetFramework $tf
@@ -348,16 +361,49 @@ try {
         foreach ($packageId in $packageList) {
             # Fetch best compatible version from NuGet based on framework requirements
             $version = Get-BestPackageVersion -PackageId $packageId -TargetFramework $tf -AllowPrerelease $allowPrereleaseForFramework
+            
             if ($version) {
                 $packageVersionsByFramework[$tf][$packageId] = $version
+            } else {
+                # Track unresolved packages
+                if (-not $unresolvedPackages.ContainsKey($packageId)) {
+                    $unresolvedPackages[$packageId] = @()
+                }
+                $unresolvedPackages[$packageId] += $tf
+                
+                # Try to preserve old version if it exists
+                $oldKey = "$packageId|$tf"
+                $oldCommonKey = "$packageId|common"
+                
+                if ($oldVersions.ContainsKey($oldKey)) {
+                    $preservedVersion = $oldVersions[$oldKey]
+                    $packageVersionsByFramework[$tf][$packageId] = $preservedVersion
+                    Write-Host "    ⚠️  $packageId: Could not resolve new version, preserving old version $preservedVersion for $tf" -ForegroundColor Yellow
+                } elseif ($oldVersions.ContainsKey($oldCommonKey)) {
+                    $preservedVersion = $oldVersions[$oldCommonKey]
+                    $packageVersionsByFramework[$tf][$packageId] = $preservedVersion
+                    Write-Host "    ⚠️  $packageId: Could not resolve new version, preserving old version $preservedVersion for $tf" -ForegroundColor Yellow
+                } else {
+                    Write-Warning "    ✗ $packageId: Could not resolve version and no old version to preserve for $tf"
+                }
             }
             Start-Sleep -Milliseconds 100
         }
     }
     
+    # Warn about unresolved packages
+    if ($unresolvedPackages.Count -gt 0) {
+        Write-Host "`n  ⚠️  Warning: Some packages could not be resolved from NuGet:" -ForegroundColor Yellow
+        foreach ($pkg in $unresolvedPackages.Keys) {
+            $frameworks = $unresolvedPackages[$pkg] -join ', '
+            Write-Host "    - $pkg (for: $frameworks)" -ForegroundColor Yellow
+        }
+    }
+    
     # Determine which packages can use a common version
     $commonPackages = @{}
-    $frameworkSpecificPackages = @{}
+    $frameworkSpecificPackages = @{
+    }
     
     foreach ($packageId in $packageList) {
         $versions = @()
@@ -372,9 +418,12 @@ try {
         if ($uniqueVersions.Count -eq 1 -and $uniqueVersions[0]) {
             # All frameworks use the same version
             $commonPackages[$packageId] = $uniqueVersions[0]
-        } elseif ($uniqueVersions.Count -gt 0 -and $uniqueVersions[0]) {
+        } elseif ($uniqueVersions.Count -gt 1) {
             # Different versions per framework
             $frameworkSpecificPackages[$packageId] = $true
+        } elseif ($versions.Count -eq 0) {
+            # No version resolved for any framework - skip this package
+            Write-Warning "    Skipping $packageId - no version could be resolved for any framework"
         }
     }
     
@@ -401,6 +450,15 @@ try {
             if ($packageAttributes.ContainsKey($attrKey)) {
                 foreach ($attrName in $packageAttributes[$attrKey].Keys) {
                     $pkgVersion.SetAttribute($attrName, $packageAttributes[$attrKey][$attrName])
+                }
+            }
+            
+            # Restore child elements (PrivateAssets, IncludeAssets, etc.)
+            if ($packageChildElements.ContainsKey($attrKey)) {
+                foreach ($childElement in $packageChildElements[$attrKey]) {
+                    $child = $xml.CreateElement($childElement.Name)
+                    $child.InnerText = $childElement.Value
+                    $pkgVersion.AppendChild($child) | Out-Null
                 }
             }
             
@@ -438,8 +496,9 @@ try {
             
             $prereleaseLabel = if ($version -match '-') { " (prerelease)" } else { "" }
             $changeLabel = if ($oldVersion -and $oldVersion -ne $version) { " (was $oldVersion)" } else { "" }
+            $childLabel = if ($packageChildElements.ContainsKey($attrKey)) { " [+children]" } else { "" }
             $attrLabel = if ($packageAttributes.ContainsKey($attrKey)) { " [+attrs]" } else { "" }
-            Write-Host "    - $packageId → $version$prereleaseLabel$changeLabel$attrLabel" -ForegroundColor Gray
+            Write-Host "    - $packageId → $version$prereleaseLabel$changeLabel$attrLabel$childLabel" -ForegroundColor Gray
         }
         
         if ($itemGroup.HasChildNodes) {
@@ -483,6 +542,23 @@ try {
                         }
                     }
                     
+                    # Restore child elements (check both framework-specific and common)
+                    $childKey = "$packageId|$tf"
+                    $childCommonKey = "$packageId|common"
+                    if ($packageChildElements.ContainsKey($childKey)) {
+                        foreach ($childElement in $packageChildElements[$childKey]) {
+                            $child = $xml.CreateElement($childElement.Name)
+                            $child.InnerText = $childElement.Value
+                            $pkgVersion.AppendChild($child) | Out-Null
+                        }
+                    } elseif ($packageChildElements.ContainsKey($childCommonKey)) {
+                        foreach ($childElement in $packageChildElements[$childCommonKey]) {
+                            $child = $xml.CreateElement($childElement.Name)
+                            $child.InnerText = $childElement.Value
+                            $pkgVersion.AppendChild($child) | Out-Null
+                        }
+                    }
+                    
                     $itemGroup.AppendChild($pkgVersion) | Out-Null
                     $hasPackages = $true
                     
@@ -515,8 +591,9 @@ try {
                     
                     $prereleaseLabel = if ($version -match '-') { " (prerelease)" } else { "" }
                     $changeLabel = if ($oldVersion -and $oldVersion -ne $version) { " (was $oldVersion)" } else { "" }
+                    $childLabel = if ($packageChildElements.ContainsKey($childKey) -or $packageChildElements.ContainsKey($childCommonKey)) { " [+children]" } else { "" }
                     $attrLabel = if ($packageAttributes.ContainsKey($attrKey) -or $packageAttributes.ContainsKey($attrCommonKey)) { " [+attrs]" } else { "" }
-                    Write-Host "    [$tf] $packageId → $version$prereleaseLabel$changeLabel$attrLabel" -ForegroundColor DarkGray
+                    Write-Host "    [$tf] $packageId → $version$prereleaseLabel$changeLabel$attrLabel$childLabel" -ForegroundColor DarkGray
                 }
             }
             
