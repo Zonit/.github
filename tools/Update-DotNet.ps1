@@ -55,6 +55,11 @@ function Get-BestPackageVersion {
         $response = Invoke-RestMethod $url -TimeoutSec 15
         $versions = $response.versions
         
+        if (-not $versions -or $versions.Count -eq 0) {
+            Write-Warning "No versions found for ${PackageId}"
+            return $null
+        }
+        
         if ($TargetFramework -match 'net(\d+)\.?') {
             $targetMajor = [int]$matches[1]
         } else {
@@ -70,8 +75,16 @@ function Get-BestPackageVersion {
                     Version = $v
                     IsPrerelease = $_ -match '-'
                 }
-            } catch { $null }
+            } catch { 
+                Write-Verbose "Failed to parse version: $_"
+                $null 
+            }
         } | Where-Object { $_ -ne $null }
+        
+        if ($allVersions.Count -eq 0) {
+            Write-Warning "No valid versions found for ${PackageId}"
+            return $null
+        }
         
         # Strategy (priority order):
         # 1. Latest stable with exact major version
@@ -92,6 +105,11 @@ function Get-BestPackageVersion {
             $best = $allVersions | Where-Object { 
                 $_.Version.Major -eq $targetMajor 
             } | Sort-Object -Property @{Expression={$_.Version}; Descending=$true} | Select-Object -First 1
+        }
+        
+        if (-not $best) {
+            Write-Warning "No suitable version found for ${PackageId} targeting ${TargetFramework}"
+            return $null
         }
         
         return $best.OriginalString
@@ -258,8 +276,9 @@ try {
     }
     
     # Determine which packages can use a common version
-    $commonPackages = @{}
-    $frameworkSpecificPackages = @{}
+    $commonPackages = @{
+    $frameworkSpecificPackages = @{
+    }
     
     foreach ($packageId in $packageList) {
         $versions = @()
@@ -271,10 +290,10 @@ try {
         
         $uniqueVersions = $versions | Select-Object -Unique
         
-        if ($uniqueVersions.Count -eq 1) {
+        if ($uniqueVersions.Count -eq 1 -and $uniqueVersions[0]) {
             # All frameworks use the same version
             $commonPackages[$packageId] = $uniqueVersions[0]
-        } else {
+        } elseif ($uniqueVersions.Count -gt 0) {
             # Different versions per framework
             $frameworkSpecificPackages[$packageId] = $true
         }
@@ -287,6 +306,13 @@ try {
         
         foreach ($packageId in ($commonPackages.Keys | Sort-Object)) {
             $version = $commonPackages[$packageId]
+            
+            # Skip if version is invalid
+            if (-not $version -or $version -eq "0") {
+                Write-Warning "    Skipping $packageId - invalid version: $version"
+                continue
+            }
+            
             $pkgVersion = $xml.CreateElement("PackageVersion")
             $pkgVersion.SetAttribute("Include", $packageId)
             $pkgVersion.SetAttribute("Version", $version)
@@ -309,7 +335,9 @@ try {
             Write-Host "    - $packageId → $version$prereleaseLabel$changeLabel" -ForegroundColor Gray
         }
         
-        $xml.Project.AppendChild($itemGroup) | Out-Null
+        if ($itemGroup.HasChildNodes) {
+            $xml.Project.AppendChild($itemGroup) | Out-Null
+        }
     }
     
     # Create conditional ItemGroups for framework-specific packages
@@ -324,6 +352,13 @@ try {
             foreach ($packageId in ($frameworkSpecificPackages.Keys | Sort-Object)) {
                 if ($packageVersionsByFramework[$tf].ContainsKey($packageId)) {
                     $version = $packageVersionsByFramework[$tf][$packageId]
+                    
+                    # Skip if version is invalid
+                    if (-not $version -or $version -eq "0") {
+                        Write-Warning "    [$tf] Skipping $packageId - invalid version: $version"
+                        continue
+                    }
+                    
                     $pkgVersion = $xml.CreateElement("PackageVersion")
                     $pkgVersion.SetAttribute("Include", $packageId)
                     $pkgVersion.SetAttribute("Version", $version)
