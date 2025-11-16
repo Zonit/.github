@@ -306,17 +306,25 @@ jobs:
           
           BRANCH_NAME="auto/update-dotnet-org-wide"
           
-          # Check if branch exists locally
+          # Always start from a clean state - delete branch if it exists
+          # This ensures we don't carry over any rejected/modified changes
           if git show-ref --verify --quiet "refs/heads/$BRANCH_NAME"; then
-            echo "Branch $BRANCH_NAME already exists locally, switching to it"
-            git checkout "$BRANCH_NAME"
-          else
-            echo "Creating new branch $BRANCH_NAME"
-            git checkout -b "$BRANCH_NAME"
+            echo "Deleting existing local branch $BRANCH_NAME to start fresh"
+            git branch -D "$BRANCH_NAME"
           fi
           
+          # Delete remote branch if it exists
+          if git ls-remote --heads origin "$BRANCH_NAME" | grep -q "$BRANCH_NAME"; then
+            echo "Deleting existing remote branch $BRANCH_NAME to start fresh"
+            git push origin --delete "$BRANCH_NAME" || echo "Failed to delete remote branch (may not exist)"
+          fi
+          
+          # Create fresh branch from current HEAD (which is at master)
+          echo "Creating fresh branch $BRANCH_NAME"
+          git checkout -b "$BRANCH_NAME"
+          
           git commit -m "Update .NET to ${{ needs.discover-repos.outputs.frameworks }}"
-          git push -f origin "$BRANCH_NAME"
+          git push origin "$BRANCH_NAME"
           
           # Create PR body using heredoc
           cat > /tmp/pr_body.md << 'PR_BODY_EOF'
@@ -419,7 +427,7 @@ jobs:
             echo "No existing PR found. Creating new PR..."
             
             PR_URL=$(gh pr create \
-              --title "[Org Update] Update .NET to ${{ needs.discover_repos.outputs.frameworks }}" \
+              --title "[Org Update] Update .NET to ${{ needs.discover-repos.outputs.frameworks }}" \
               --body-file /tmp/pr_body.md \
               --base master \
               --head "$BRANCH_NAME" \
