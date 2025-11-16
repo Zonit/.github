@@ -231,14 +231,15 @@ $packageChanges = @()
 try {
     [xml]$xml = Get-Content $propsFile.FullName
     
-    # Collect OLD versions before removing
+    # Collect OLD versions and attributes before removing
     $oldVersions = @{}
+    $packageAttributes = @{}
     
     # Get all ItemGroups (both conditional and unconditional)
     $existingItemGroups = @($xml.Project.ItemGroup)
     
     foreach ($ig in $existingItemGroups) {
-        # Collect versions from all ItemGroups - preserve existing versions
+        # Collect versions and attributes from all ItemGroups
         foreach ($pv in $ig.PackageVersion) {
             if ($pv.Include -and $pv.Version) {
                 if ($ig.Condition -and $ig.Condition -match "'.*?' == '(net\d+\.\d+)'") {
@@ -248,6 +249,17 @@ try {
                     $key = "$($pv.Include)|common"
                 }
                 $oldVersions[$key] = $pv.Version
+                
+                # Store all attributes except Include and Version
+                $attrs = @{}
+                foreach ($attr in $pv.Attributes) {
+                    if ($attr.Name -notin @('Include', 'Version')) {
+                        $attrs[$attr.Name] = $attr.Value
+                    }
+                }
+                if ($attrs.Count -gt 0) {
+                    $packageAttributes[$key] = $attrs
+                }
             }
         }
         
@@ -267,29 +279,12 @@ try {
         Write-Host "  Resolving versions for $tf..." -ForegroundColor Cyan
         
         foreach ($packageId in $packageList) {
-            # First check if we have an existing version for this framework
-            $existingKey = "$packageId|$tf"
-            $existingCommonKey = "$packageId|common"
-            
-            $existingVersion = $null
-            if ($oldVersions.ContainsKey($existingKey)) {
-                $existingVersion = $oldVersions[$existingKey]
-            } elseif ($oldVersions.ContainsKey($existingCommonKey)) {
-                $existingVersion = $oldVersions[$existingCommonKey]
+            # Always fetch latest version from NuGet
+            $version = Get-BestPackageVersion -PackageId $packageId -TargetFramework $tf -AllowPrerelease $allowPrerelease
+            if ($version) {
+                $packageVersionsByFramework[$tf][$packageId] = $version
             }
-            
-            # If we have an existing valid version, use it
-            if ($existingVersion -and $existingVersion -ne "0") {
-                $packageVersionsByFramework[$tf][$packageId] = $existingVersion
-                Write-Verbose "Using existing version for ${packageId}: $existingVersion"
-            } else {
-                # Otherwise fetch from NuGet
-                $version = Get-BestPackageVersion -PackageId $packageId -TargetFramework $tf -AllowPrerelease $allowPrerelease
-                if ($version) {
-                    $packageVersionsByFramework[$tf][$packageId] = $version
-                }
-                Start-Sleep -Milliseconds 100
-            }
+            Start-Sleep -Milliseconds 100
         }
     }
     
@@ -334,6 +329,15 @@ try {
             $pkgVersion = $xml.CreateElement("PackageVersion")
             $pkgVersion.SetAttribute("Include", $packageId)
             $pkgVersion.SetAttribute("Version", $version)
+            
+            # Restore additional attributes if they existed
+            $attrKey = "$packageId|common"
+            if ($packageAttributes.ContainsKey($attrKey)) {
+                foreach ($attrName in $packageAttributes[$attrKey].Keys) {
+                    $pkgVersion.SetAttribute($attrName, $packageAttributes[$attrKey][$attrName])
+                }
+            }
+            
             $itemGroup.AppendChild($pkgVersion) | Out-Null
             
             # Track changes
@@ -350,7 +354,8 @@ try {
             
             $prereleaseLabel = if ($version -match '-') { " (prerelease)" } else { "" }
             $changeLabel = if ($oldVersion -and $oldVersion -ne $version) { " (was $oldVersion)" } else { "" }
-            Write-Host "    - $packageId → $version$prereleaseLabel$changeLabel" -ForegroundColor Gray
+            $attrLabel = if ($packageAttributes.ContainsKey($attrKey)) { " [+attrs]" } else { "" }
+            Write-Host "    - $packageId → $version$prereleaseLabel$changeLabel$attrLabel" -ForegroundColor Gray
         }
         
         if ($itemGroup.HasChildNodes) {
@@ -380,6 +385,20 @@ try {
                     $pkgVersion = $xml.CreateElement("PackageVersion")
                     $pkgVersion.SetAttribute("Include", $packageId)
                     $pkgVersion.SetAttribute("Version", $version)
+                    
+                    # Restore additional attributes if they existed (check both framework-specific and common)
+                    $attrKey = "$packageId|$tf"
+                    $attrCommonKey = "$packageId|common"
+                    if ($packageAttributes.ContainsKey($attrKey)) {
+                        foreach ($attrName in $packageAttributes[$attrKey].Keys) {
+                            $pkgVersion.SetAttribute($attrName, $packageAttributes[$attrKey][$attrName])
+                        }
+                    } elseif ($packageAttributes.ContainsKey($attrCommonKey)) {
+                        foreach ($attrName in $packageAttributes[$attrCommonKey].Keys) {
+                            $pkgVersion.SetAttribute($attrName, $packageAttributes[$attrCommonKey][$attrName])
+                        }
+                    }
+                    
                     $itemGroup.AppendChild($pkgVersion) | Out-Null
                     $hasPackages = $true
                     
@@ -397,7 +416,8 @@ try {
                     
                     $prereleaseLabel = if ($version -match '-') { " (prerelease)" } else { "" }
                     $changeLabel = if ($oldVersion -and $oldVersion -ne $version) { " (was $oldVersion)" } else { "" }
-                    Write-Host "    [$tf] $packageId → $version$prereleaseLabel$changeLabel" -ForegroundColor DarkGray
+                    $attrLabel = if ($packageAttributes.ContainsKey($attrKey) -or $packageAttributes.ContainsKey($attrCommonKey)) { " [+attrs]" } else { "" }
+                    Write-Host "    [$tf] $packageId → $version$prereleaseLabel$changeLabel$attrLabel" -ForegroundColor DarkGray
                 }
             }
             
