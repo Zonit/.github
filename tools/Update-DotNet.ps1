@@ -8,7 +8,7 @@ This script:
 - Removes Version attributes from PackageReference (enables central management)
 - Updates Directory.Packages.props with conditional ItemGroups per framework
 - Finds best compatible package versions for each framework
-- Supports prerelease packages for .NET 10+
+- Automatically detects if framework requires prerelease packages
 
 .PARAMETER TargetFrameworks
 List of target frameworks to support (e.g., "net8.0", "net9.0", "net10.0")
@@ -21,6 +21,7 @@ List of target frameworks to support (e.g., "net8.0", "net9.0", "net10.0")
 
 .NOTES
 Created for Zonit organization-wide .NET updates
+The script automatically detects preview .NET versions and uses prerelease packages only when necessary.
 #>
 
 param(
@@ -39,6 +40,58 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ".NET Project Update" -ForegroundColor Cyan
 Write-Host "Target Frameworks: $($TargetFrameworks -join ', ')" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
+
+# ============================================================================
+# FUNCTION: Detect if framework requires prerelease packages
+# ============================================================================
+function Test-RequiresPrerelease {
+    param(
+        [string]$TargetFramework,
+        [string]$SamplePackageId = "Microsoft.Extensions.Logging"
+    )
+    
+    try {
+        Write-Verbose "Testing if $TargetFramework requires prerelease packages..."
+        
+        # Extract major version from framework
+        if ($TargetFramework -notmatch 'net(\d+)\.') {
+            return $false
+        }
+        $targetMajor = [int]$matches[1]
+        
+        # Check if stable packages exist for this framework version
+        $url = "https://api.nuget.org/v3-flatcontainer/$($SamplePackageId.ToLower())/index.json"
+        $response = Invoke-RestMethod $url -TimeoutSec 10 -ErrorAction SilentlyContinue
+        
+        if (-not $response -or -not $response.versions) {
+            return $false
+        }
+        
+        # Check if there are any stable versions matching the target major version
+        $stableVersionsExist = $response.versions | Where-Object {
+            $_ -notmatch '-' -and $_ -match '^(\d+)\.'
+        } | ForEach-Object {
+            try {
+                $v = [version]($_ -replace '-.*', '')
+                $v.Major -ge $targetMajor
+            } catch {
+                $false
+            }
+        } | Where-Object { $_ -eq $true }
+        
+        # If no stable versions exist for this major version, we need prerelease
+        $needsPrerelease = -not $stableVersionsExist
+        
+        if ($needsPrerelease) {
+            Write-Host "  ℹ️  $TargetFramework appears to be prerelease - will allow preview packages" -ForegroundColor Yellow
+        }
+        
+        return $needsPrerelease
+    } catch {
+        Write-Verbose "Failed to detect prerelease requirement: $_"
+        return $false
+    }
+}
 
 # ============================================================================
 # FUNCTION: Get best package version for target framework
@@ -250,7 +303,7 @@ try {
         # Collect versions and attributes from all ItemGroups
         foreach ($pv in $ig.PackageVersion) {
             if ($pv.Include -and $pv.Version) {
-                if ($ig.Condition -and $ig.Condition -match "'.*?' == '(net\d+\.\d+)'") {
+                if ($ig.Condition -and $ig.Condition -match "'\`\$\(TargetFramework\)' == '(net\d+\.\d+)'") {
                     $framework = $matches[1]
                     $key = "$($pv.Include)|$framework"
                 } else {
@@ -281,14 +334,16 @@ try {
     # Collect package versions for each framework
     $packageVersionsByFramework = @{}
     foreach ($tf in $TargetFrameworks) {
-        $allowPrerelease = $tf -match 'net[1-9][0-9]+'
-        $packageVersionsByFramework[$tf] = @{
+        # Auto-detect if framework requires prerelease packages
+        $allowPrereleaseForFramework = Test-RequiresPrerelease -TargetFramework $tf
+        
+        $packageVersionsByFramework[$tf] = @{}
         
         Write-Host "  Resolving versions for $tf..." -ForegroundColor Cyan
         
         foreach ($packageId in $packageList) {
             # Always fetch latest version from NuGet
-            $version = Get-BestPackageVersion -PackageId $packageId -TargetFramework $tf -AllowPrerelease $allowPrerelease
+            $version = Get-BestPackageVersion -PackageId $packageId -TargetFramework $tf -AllowPrerelease $allowPrereleaseForFramework
             if ($version) {
                 $packageVersionsByFramework[$tf][$packageId] = $version
             }
@@ -297,9 +352,8 @@ try {
     }
     
     # Determine which packages can use a common version
-    $commonPackages = @{
-    $frameworkSpecificPackages = @{
-    }
+    $commonPackages = @{}
+    $frameworkSpecificPackages = @{}
     
     foreach ($packageId in $packageList) {
         $versions = @()
