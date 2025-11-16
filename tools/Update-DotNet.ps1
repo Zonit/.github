@@ -87,9 +87,10 @@ function Get-BestPackageVersion {
         }
         
         # Strategy (priority order):
-        # 1. Latest stable with exact major version
+        # 1. Latest stable with exact major version (semantic version, not major-only)
         # 2. Latest stable with lower major version
         # 3. Latest prerelease with exact major (if AllowPrerelease)
+        # Never use major-only versions like "6" or "9" - always use semantic versions
         
         $best = $allVersions | Where-Object { 
             -not $_.IsPrerelease -and $_.Version.Major -eq $targetMajor 
@@ -112,7 +113,14 @@ function Get-BestPackageVersion {
             return $null
         }
         
-        return $best.OriginalString
+        # Ensure we return a full semantic version, never major-only
+        $resultVersion = $best.OriginalString
+        if ($resultVersion -match '^\d+$') {
+            Write-Warning "Rejecting major-only version '$resultVersion' for ${PackageId} - this is too broad"
+            return $null
+        }
+        
+        return $resultVersion
     } catch {
         Write-Warning "Error getting version for ${PackageId}: $_"
         return $null
