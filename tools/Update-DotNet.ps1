@@ -134,6 +134,10 @@ function Get-BestPackageVersion {
         }
         
         # Improved strategy: Find latest compatible version regardless of version numbering scheme
+        # This works for ALL packages:
+        # - Microsoft packages with .NET-aligned versions (8.x, 9.x)
+        # - Microsoft packages with independent versions (CodeAnalysis 4.x, AspNetCore 2.x)
+        # - Third-party packages (Newtonsoft.Json 13.x, Serilog 3.x, etc.)
         # Priority order:
         # 1. Latest stable version (if not AllowPrerelease)
         # 2. Latest version including prerelease (if AllowPrerelease)
