@@ -305,7 +305,16 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           
           BRANCH_NAME="auto/update-dotnet-org-wide"
-          git checkout -b "$BRANCH_NAME"
+          
+          # Check if branch exists locally
+          if git show-ref --verify --quiet "refs/heads/$BRANCH_NAME"; then
+            echo "Branch $BRANCH_NAME already exists locally, switching to it"
+            git checkout "$BRANCH_NAME"
+          else
+            echo "Creating new branch $BRANCH_NAME"
+            git checkout -b "$BRANCH_NAME"
+          fi
+          
           git commit -m "Update .NET to ${{ needs.discover-repos.outputs.frameworks }}"
           git push -f origin "$BRANCH_NAME"
           
@@ -410,7 +419,7 @@ jobs:
             echo "No existing PR found. Creating new PR..."
             
             PR_URL=$(gh pr create \
-              --title "[Org Update] Update .NET to ${{ needs.discover-repos.outputs.frameworks }}" \
+              --title "[Org Update] Update .NET to ${{ needs.discover_repos.outputs.frameworks }}" \
               --body-file /tmp/pr_body.md \
               --base master \
               --head "$BRANCH_NAME" \
