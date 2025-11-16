@@ -289,6 +289,10 @@ if (-not $propsFile) {
 # Track package version changes for report
 $packageChanges = @()
 
+# Initialize variables before try block to ensure they're always available for report
+$commonPackages = @{}
+$frameworkSpecificPackages = @{}
+
 try {
     [xml]$xml = Get-Content $propsFile.FullName
     
