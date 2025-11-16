@@ -307,7 +307,7 @@ try {
         # Collect versions and attributes from all ItemGroups
         foreach ($pv in $ig.PackageVersion) {
             if ($pv.Include -and $pv.Version) {
-                if ($ig.Condition -and $ig.Condition -match '"\$\(TargetFramework\)" == "(net\d+\.\d+)"') {
+                if ($ig.Condition -and $ig.Condition -match "'\`$\(TargetFramework\)' == '(net\d+\.\d+)'") {
                     $framework = $matches[1]
                     $key = "$($pv.Include)|$framework"
                 } else {
@@ -565,8 +565,8 @@ if ($packageChanges.Count -gt 0) {
             # Different versions per framework
             Write-Host "  $pkg :" -ForegroundColor White
             foreach ($change in $changes) {
-                Write-Host "    [$($(change.Framework))] $($(change.OldVersion)) → $($(change.NewVersion))" -ForegroundColor Gray
-                $changeSummary += "$pkg [$($(change.Framework))]: $($(change.OldVersion)) → $($(change.NewVersion))"
+                Write-Host "    [$($change.Framework)] $($change.OldVersion) → $($change.NewVersion)" -ForegroundColor Gray
+                $changeSummary += "$pkg [$($change.Framework)]: $($change.OldVersion) → $($change.NewVersion)"
             }
         }
     }

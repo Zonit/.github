@@ -392,10 +392,33 @@ jobs:
             --title "[Org Update] Update .NET to ${{ needs.discover-repos.outputs.frameworks }}" \
             --body-file /tmp/pr_body.md \
             --base master \
-            --head "$BRANCH_NAME")
+            --head "$BRANCH_NAME" \
+            --label "action-update")
           
           echo "pr_url=$PR_URL" >> $GITHUB_OUTPUT
           echo "Created PR: $PR_URL"
+      
+      - name: Ensure label exists and add to PR
+        if: steps.check-dotnet.outputs.has_dotnet == 'true' && inputs.dry-run == false && steps.create-pr.outputs.pr_url != ''
+        env:
+          GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          REPO_NAME="Zonit/${{ matrix.repo }}"
+          PR_NUMBER=$(echo "${{ steps.create-pr.outputs.pr_url }}" | grep -oP '\d+$')
+          
+          # Check if label exists in the repository
+          if ! gh label list --repo "$REPO_NAME" --json name --jq '.[] | select(.name == "action-update")' | grep -q "action-update"; then
+            echo "Label 'action-update' does not exist. Creating it..."
+            gh label create "action-update" \
+              --repo "$REPO_NAME" \
+              --description "Automated updates from GitHub Actions" \
+              --color "0E8A16" || echo "Label might already exist or creation failed (non-critical)"
+          fi
+          
+          # Add label to PR (if not already added during creation)
+          gh pr edit "$PR_NUMBER" --repo "$REPO_NAME" --add-label "action-update" || echo "Label already exists on PR"
+          
+          echo "? Label 'action-update' ensured on PR #$PR_NUMBER"
       
       - name: Update tracking issue with PR
         if: steps.check-dotnet.outputs.has_dotnet == 'true' && inputs.dry-run == false && steps.create-pr.outputs.pr_url != ''
