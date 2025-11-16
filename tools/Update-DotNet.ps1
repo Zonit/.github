@@ -43,7 +43,7 @@ Write-Host "========================================" -ForegroundColor Cyan
 
 # ============================================================================
 # FUNCTION: Detect if framework requires prerelease packages
-# ============================================================================
+# =============================================================================
 function Test-RequiresPrerelease {
     param(
         [string]$TargetFramework,
@@ -342,10 +342,25 @@ try {
                 }
             }
         }
+    }
+    
+    # Remove ONLY conditional ItemGroups that match our target frameworks
+    # This allows us to recreate them with updated package versions
+    # PRESERVE unconditional ItemGroups (common packages without conditions)
+    foreach ($ig in $existingItemGroups) {
+        $shouldRemove = $false
         
-        # Remove ItemGroups that contain PackageVersion elements
-        # This removes both conditional and unconditional ItemGroups with package definitions
-        if ($ig.PackageVersion) {
+        if ($ig.PackageVersion -and $ig.Condition) {
+            # Check if this ItemGroup's condition matches any of our target frameworks
+            foreach ($tf in $TargetFrameworks) {
+                if ($ig.Condition -match [regex]::Escape($tf)) {
+                    $shouldRemove = $true
+                    break
+                }
+            }
+        }
+        
+        if ($shouldRemove) {
             $xml.Project.RemoveChild($ig) | Out-Null
         }
     }
@@ -404,7 +419,9 @@ try {
         }
     }
     
-    # Determine which packages can use a common version
+    # Determine which packages can use a common version vs framework-specific
+    # NOTE: We ALWAYS create conditional ItemGroups for target frameworks
+    # even if all packages currently have the same version
     $commonPackages = @{}
     $frameworkSpecificPackages = @{}
     
@@ -419,8 +436,9 @@ try {
         $uniqueVersions = $versions | Select-Object -Unique
         
         if ($uniqueVersions.Count -eq 1 -and $uniqueVersions[0]) {
-            # All frameworks use the same version
-            $commonPackages[$packageId] = $uniqueVersions[0]
+            # All frameworks use the same version - but we still add to framework-specific
+            # to maintain conditional ItemGroups per framework
+            $frameworkSpecificPackages[$packageId] = $true
         } elseif ($uniqueVersions.Count -gt 1) {
             # Different versions per framework
             $frameworkSpecificPackages[$packageId] = $true
@@ -430,186 +448,106 @@ try {
         }
     }
     
-    # Create unconditional ItemGroup for common packages
-    if ($commonPackages.Count -gt 0) {
-        Write-Host "  Creating common package versions..." -ForegroundColor Cyan
+    # Create conditional ItemGroups for ALL packages (per framework)
+    # This maintains the structure of having framework-specific package definitions
+    Write-Host "  Creating framework-specific package versions..." -ForegroundColor Yellow
+    
+    foreach ($tf in $TargetFrameworks) {
         $itemGroup = $xml.CreateElement("ItemGroup")
+        $itemGroup.SetAttribute("Condition", "'`$(TargetFramework)' == '$tf'")
+        $hasPackages = $false
         
-        foreach ($packageId in ($commonPackages.Keys | Sort-Object)) {
-            $version = $commonPackages[$packageId]
-            
-            # Skip if version is invalid (null, "0", or major-only like "8")
-            if (-not $version -or $version -eq "0" -or $version -match '^\d+$') {
-                Write-Warning "    Skipping $packageId - invalid version: $version"
-                continue
-            }
-            
-            $pkgVersion = $xml.CreateElement("PackageVersion")
-            $pkgVersion.SetAttribute("Include", $packageId)
-            $pkgVersion.SetAttribute("Version", $version)
-            
-            # Restore additional attributes if they existed
-            $attrKey = "$packageId|common"
-            if ($packageAttributes.ContainsKey($attrKey)) {
-                foreach ($attrName in $packageAttributes[$attrKey].Keys) {
-                    $pkgVersion.SetAttribute($attrName, $packageAttributes[$attrKey][$attrName])
+        foreach ($packageId in ($packageList | Sort-Object)) {
+            if ($packageVersionsByFramework[$tf].ContainsKey($packageId)) {
+                $version = $packageVersionsByFramework[$tf][$packageId]
+                
+                # Skip if version is invalid (null, "0", or major-only like "8")
+                if (-not $version -or $version -eq "0" -or $version -match '^\d+$') {
+                    Write-Warning "    [$tf] Skipping $packageId - invalid version: $version"
+                    continue
                 }
-            }
-            
-            # Restore child elements (PrivateAssets, IncludeAssets, etc.)
-            if ($packageChildElements.ContainsKey($attrKey)) {
-                foreach ($childElement in $packageChildElements[$attrKey]) {
-                    $child = $xml.CreateElement($childElement.Name)
-                    $child.InnerText = $childElement.Value
-                    $pkgVersion.AppendChild($child) | Out-Null
-                }
-            }
-            
-            $itemGroup.AppendChild($pkgVersion) | Out-Null
-            
-            # Track changes - check both common key and all framework-specific keys
-            $oldVersion = $null
-            $oldKey = "$packageId|common"
-            
-            # First try to find old version in common configuration
-            if ($oldVersions.ContainsKey($oldKey)) {
-                $oldVersion = $oldVersions[$oldKey]
-            }
-            
-            # If not found in common, check all framework-specific configurations
-            if (-not $oldVersion) {
-                foreach ($tf in $TargetFrameworks) {
-                    $fwKey = "$packageId|$tf"
-                    if ($oldVersions.ContainsKey($fwKey)) {
-                        $oldVersion = $oldVersions[$fwKey]
-                        break  # Use first found version
+                
+                $pkgVersion = $xml.CreateElement("PackageVersion")
+                $pkgVersion.SetAttribute("Include", $packageId)
+                $pkgVersion.SetAttribute("Version", $version)
+                
+                # Restore additional attributes if they existed (check both framework-specific and common)
+                $attrKey = "$packageId|$tf"
+                $attrCommonKey = "$packageId|common"
+                if ($packageAttributes.ContainsKey($attrKey)) {
+                    foreach ($attrName in $packageAttributes[$attrKey].Keys) {
+                        $pkgVersion.SetAttribute($attrName, $packageAttributes[$attrKey][$attrName])
+                    }
+                } elseif ($packageAttributes.ContainsKey($attrCommonKey)) {
+                    foreach ($attrName in $packageAttributes[$attrCommonKey].Keys) {
+                        $pkgVersion.SetAttribute($attrName, $packageAttributes[$attrCommonKey][$attrName])
                     }
                 }
-            }
-            
-            # Track changes: both version updates AND new additions
-            if (-not $oldVersion -or $oldVersion -ne $version) {
-                $packageChanges += [PSCustomObject]@{
-                    Package = $packageId
-                    Framework = "all"
-                    OldVersion = if ($oldVersion) { $oldVersion } else { "(new)" }
-                    NewVersion = $version
+                
+                # Restore child elements (check both framework-specific and common)
+                $childKey = "$packageId|$tf"
+                $childCommonKey = "$packageId|common"
+                if ($packageChildElements.ContainsKey($childKey)) {
+                    foreach ($childElement in $packageChildElements[$childKey]) {
+                        $child = $xml.CreateElement($childElement.Name)
+                        $child.InnerText = $childElement.Value
+                        $pkgVersion.AppendChild($child) | Out-Null
+                    }
+                } elseif ($packageChildElements.ContainsKey($childCommonKey)) {
+                    foreach ($childElement in $packageChildElements[$childCommonKey]) {
+                        $child = $xml.CreateElement($childElement.Name)
+                        $child.InnerText = $childElement.Value
+                        $pkgVersion.AppendChild($child) | Out-Null
+                    }
                 }
+                
+                $itemGroup.AppendChild($pkgVersion) | Out-Null
+                $hasPackages = $true
+                
+                # Track changes - check both framework-specific key and common key
+                $oldVersion = $null
+                $oldKey = "$packageId|$tf"
+                
+                # First try to find old version in framework-specific configuration
+                if ($oldVersions.ContainsKey($oldKey)) {
+                    $oldVersion = $oldVersions[$oldKey]
+                }
+                
+                # If not found, check common configuration
+                if (-not $oldVersion) {
+                    $commonKey = "$packageId|common"
+                    if ($oldVersions.ContainsKey($commonKey)) {
+                        $oldVersion = $oldVersions[$commonKey]
+                    }
+                }
+                
+                # Track changes: both version updates AND new additions
+                if (-not $oldVersion -or $oldVersion -ne $version) {
+                    $packageChanges += [PSCustomObject]@{
+                        Package = $packageId
+                        Framework = $tf
+                        OldVersion = if ($oldVersion) { $oldVersion } else { "(new)" }
+                        NewVersion = $version
+                    }
+                }
+                
+                $prereleaseLabel = if ($version -match '-') { " (prerelease)" } else { "" }
+                $changeLabel = if ($oldVersion -and $oldVersion -ne $version) { " (was $oldVersion)" } else { "" }
+                $childLabel = if ($packageChildElements.ContainsKey($childKey) -or $packageChildElements.ContainsKey($childCommonKey)) { " [+children]" } else { "" }
+                $attrLabel = if ($packageAttributes.ContainsKey($attrKey) -or $packageAttributes.ContainsKey($attrCommonKey)) { " [+attrs]" } else { "" }
+                Write-Host "    [$tf] $packageId -> $version$prereleaseLabel$changeLabel$attrLabel$childLabel" -ForegroundColor DarkGray
             }
-            
-            $prereleaseLabel = if ($version -match '-') { " (prerelease)" } else { "" }
-            $changeLabel = if ($oldVersion -and $oldVersion -ne $version) { " (was $oldVersion)" } else { "" }
-            $childLabel = if ($packageChildElements.ContainsKey($attrKey)) { " [+children]" } else { "" }
-            $attrLabel = if ($packageAttributes.ContainsKey($attrKey)) { " [+attrs]" } else { "" }
-            Write-Host "    - $packageId -> $version$prereleaseLabel$changeLabel$attrLabel$childLabel" -ForegroundColor Gray
         }
         
-        if ($itemGroup.HasChildNodes) {
+        if ($hasPackages) {
             $xml.Project.AppendChild($itemGroup) | Out-Null
         }
     }
-    
-    # Create conditional ItemGroups for framework-specific packages
-    if ($frameworkSpecificPackages.Count -gt 0) {
-        Write-Host "  Creating framework-specific package versions..." -ForegroundColor Yellow
-        
-        foreach ($tf in $TargetFrameworks) {
-            $itemGroup = $xml.CreateElement("ItemGroup")
-            $itemGroup.SetAttribute("Condition", "'`$(TargetFramework)' == '$tf'")
-            $hasPackages = $false
-            
-            foreach ($packageId in ($frameworkSpecificPackages.Keys | Sort-Object)) {
-                if ($packageVersionsByFramework[$tf].ContainsKey($packageId)) {
-                    $version = $packageVersionsByFramework[$tf][$packageId]
-                    
-                    # Skip if version is invalid (null, "0", or major-only like "8")
-                    if (-not $version -or $version -eq "0" -or $version -match '^\d+$') {
-                        Write-Warning "    [$tf] Skipping $packageId - invalid version: $version"
-                        continue
-                    }
-                    
-                    $pkgVersion = $xml.CreateElement("PackageVersion")
-                    $pkgVersion.SetAttribute("Include", $packageId)
-                    $pkgVersion.SetAttribute("Version", $version)
-                    
-                    # Restore additional attributes if they existed (check both framework-specific and common)
-                    $attrKey = "$packageId|$tf"
-                    $attrCommonKey = "$packageId|common"
-                    if ($packageAttributes.ContainsKey($attrKey)) {
-                        foreach ($attrName in $packageAttributes[$attrKey].Keys) {
-                            $pkgVersion.SetAttribute($attrName, $packageAttributes[$attrKey][$attrName])
-                        }
-                    } elseif ($packageAttributes.ContainsKey($attrCommonKey)) {
-                        foreach ($attrName in $packageAttributes[$attrCommonKey].Keys) {
-                            $pkgVersion.SetAttribute($attrName, $packageAttributes[$attrCommonKey][$attrName])
-                        }
-                    }
-                    
-                    # Restore child elements (check both framework-specific and common)
-                    $childKey = "$packageId|$tf"
-                    $childCommonKey = "$packageId|common"
-                    if ($packageChildElements.ContainsKey($childKey)) {
-                        foreach ($childElement in $packageChildElements[$childKey]) {
-                            $child = $xml.CreateElement($childElement.Name)
-                            $child.InnerText = $childElement.Value
-                            $pkgVersion.AppendChild($child) | Out-Null
-                        }
-                    } elseif ($packageChildElements.ContainsKey($childCommonKey)) {
-                        foreach ($childElement in $packageChildElements[$childCommonKey]) {
-                            $child = $xml.CreateElement($childElement.Name)
-                            $child.InnerText = $childElement.Value
-                            $pkgVersion.AppendChild($child) | Out-Null
-                        }
-                    }
-                    
-                    $itemGroup.AppendChild($pkgVersion) | Out-Null
-                    $hasPackages = $true
-                    
-                    # Track changes - check both framework-specific key and common key
-                    $oldVersion = $null
-                    $oldKey = "$packageId|$tf"
-                    
-                    # First try to find old version in framework-specific configuration
-                    if ($oldVersions.ContainsKey($oldKey)) {
-                        $oldVersion = $oldVersions[$oldKey]
-                    }
-                    
-                    # If not found, check common configuration
-                    if (-not $oldVersion) {
-                        $commonKey = "$packageId|common"
-                        if ($oldVersions.ContainsKey($commonKey)) {
-                            $oldVersion = $oldVersions[$commonKey]
-                        }
-                    }
-                    
-                    # Track changes: both version updates AND new additions
-                    if (-not $oldVersion -or $oldVersion -ne $version) {
-                        $packageChanges += [PSCustomObject]@{
-                            Package = $packageId
-                            Framework = $tf
-                            OldVersion = if ($oldVersion) { $oldVersion } else { "(new)" }
-                            NewVersion = $version
-                        }
-                    }
-                    
-                    $prereleaseLabel = if ($version -match '-') { " (prerelease)" } else { "" }
-                    $changeLabel = if ($oldVersion -and $oldVersion -ne $version) { " (was $oldVersion)" } else { "" }
-                    $childLabel = if ($packageChildElements.ContainsKey($childKey) -or $packageChildElements.ContainsKey($childCommonKey)) { " [+children]" } else { "" }
-                    $attrLabel = if ($packageAttributes.ContainsKey($attrKey) -or $packageAttributes.ContainsKey($attrCommonKey)) { " [+attrs]" } else { "" }
-                    Write-Host "    [$tf] $packageId -> $version$prereleaseLabel$changeLabel$attrLabel$childLabel" -ForegroundColor DarkGray
-                }
-            }
-            
-            if ($hasPackages) {
-                $xml.Project.AppendChild($itemGroup) | Out-Null
-            }
-        }
-    }
-    
+
     $xml.Save($propsFile.FullName)
     Write-Host "  [OK] Saved Directory.Packages.props" -ForegroundColor Green
-    Write-Host "    Common packages: $($commonPackages.Count)" -ForegroundColor Gray
-    Write-Host "    Framework-specific packages: $($frameworkSpecificPackages.Count)" -ForegroundColor Gray
+    Write-Host "    Framework-specific package groups: $($TargetFrameworks.Count)" -ForegroundColor Gray
+    Write-Host "    Total packages configured: $($packageList.Count)" -ForegroundColor Gray
     
 } catch {
     Write-Error "Failed to update Directory.Packages.props: $_"
@@ -670,8 +608,7 @@ $report = @{
         ProjectsUpdated = $csprojs.Count
         PackagesConfigured = $packageList.Count
         PackagesChanged = $packageChanges.Count
-        CommonPackages = $commonPackages.Count
-        FrameworkSpecificPackages = $frameworkSpecificPackages.Count
+        FrameworkSpecificGroups = $TargetFrameworks.Count
         FrameworksSet = $targetFrameworksString
         DirectoryPackagesPropsUpdated = [bool]$propsFile
     }
