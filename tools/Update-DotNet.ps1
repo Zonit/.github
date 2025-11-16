@@ -80,7 +80,7 @@ function Test-RequiresPrerelease {
         } | Where-Object { $_ -eq $true }
         
         # If no stable versions exist for this major version, we need prerelease
-        $needsPrerelease = -not $stableVersionsExist
+        $needsPrerelease = @($stableVersionsExist).Count -eq 0
         
         if ($needsPrerelease) {
             Write-Host "  ℹ️  $TargetFramework appears to be prerelease - will allow preview packages" -ForegroundColor Yellow
@@ -386,8 +386,8 @@ try {
         foreach ($packageId in ($commonPackages.Keys | Sort-Object)) {
             $version = $commonPackages[$packageId]
             
-            # Skip if version is invalid
-            if (-not $version -or $version -eq "0") {
+            # Skip if version is invalid (null, "0", or major-only like "8")
+            if (-not $version -or $version -eq "0" -or $version -match '^\d+$') {
                 Write-Warning "    Skipping $packageId - invalid version: $version"
                 continue
             }
@@ -460,8 +460,8 @@ try {
                 if ($packageVersionsByFramework[$tf].ContainsKey($packageId)) {
                     $version = $packageVersionsByFramework[$tf][$packageId]
                     
-                    # Skip if version is invalid
-                    if (-not $version -or $version -eq "0") {
+                    # Skip if version is invalid (null, "0", or major-only like "8")
+                    if (-not $version -or $version -eq "0" -or $version -match '^\d+$') {
                         Write-Warning "    [$tf] Skipping $packageId - invalid version: $version"
                         continue
                     }
