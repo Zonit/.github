@@ -477,7 +477,11 @@ foreach ($proj in $csprojs) {
 Write-Host "`n[5/6] Resolving package versions for each framework..." -ForegroundColor Yellow
 
 # Merge package lists: packages from .csproj + packages with PrivateAssets
-$allPackagesToResolve = [System.Collections.Generic.HashSet[string]]::new($packageList)
+# FIX: Use empty constructor and Add() method for compatibility
+$allPackagesToResolve = [System.Collections.Generic.HashSet[string]]::new()
+foreach ($pkg in $packageList) {
+    $null = $allPackagesToResolve.Add($pkg)
+}
 foreach ($pkg in $privateAssetPackages.Keys) {
     $null = $allPackagesToResolve.Add($pkg)
 }
