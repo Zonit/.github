@@ -113,6 +113,14 @@ function Get-BestPackageVersion {
             return $null
         }
         
+        # Extract target major version from framework
+        if ($TargetFramework -match 'net(\d+)\.') {
+            $targetMajor = [int]$matches[1]
+        } else {
+            Write-Warning "Cannot extract major version from $TargetFramework"
+            return $null
+        }
+        
         # Parse all versions
         $allVersions = $versions | ForEach-Object {
             try {
@@ -133,23 +141,49 @@ function Get-BestPackageVersion {
             return $null
         }
         
-        # Improved strategy: Find latest compatible version regardless of version numbering scheme
-        # This works for ALL packages:
-        # - Microsoft packages with .NET-aligned versions (8.x, 9.x)
-        # - Microsoft packages with independent versions (CodeAnalysis 4.x, AspNetCore 2.x)
-        # - Third-party packages (Newtonsoft.Json 13.x, Serilog 3.x, etc.)
-        # Priority order:
-        # 1. Latest stable version (if not AllowPrerelease)
-        # 2. Latest version including prerelease (if AllowPrerelease)
+        # Strategy for Microsoft packages vs third-party:
+        # 1. For Microsoft.* packages that follow .NET versioning - try to match major version
+        # 2. For packages that don't follow .NET versioning - get latest compatible
         
         $best = $null
         
-        if ($AllowPrerelease) {
-            # Allow any version (stable or prerelease)
-            $best = $allVersions | Sort-Object -Property @{Expression={$_.Version}; Descending=$true} | Select-Object -First 1
-        } else {
-            # Only stable versions
-            $best = $allVersions | Where-Object { -not $_.IsPrerelease } | Sort-Object -Property @{Expression={$_.Version}; Descending=$true} | Select-Object -First 1
+        # Check if this is a Microsoft package that typically follows .NET versioning
+        $followsDotNetVersioning = $PackageId -match '^Microsoft\.(Extensions|AspNetCore|EntityFrameworkCore|JSInterop)\.'
+        
+        if ($followsDotNetVersioning) {
+            # First try: exact major version match
+            if ($AllowPrerelease) {
+                $best = $allVersions | Where-Object { 
+                    $_.Version.Major -eq $targetMajor 
+                } | Sort-Object -Property @{Expression={$_.Version}; Descending=$true} | Select-Object -First 1
+            } else {
+                $best = $allVersions | Where-Object { 
+                    $_.Version.Major -eq $targetMajor -and -not $_.IsPrerelease 
+                } | Sort-Object -Property @{Expression={$_.Version}; Descending=$true} | Select-Object -First 1
+            }
+            
+            # Second try: if no exact match, try one major version lower
+            if (-not $best -and $targetMajor -gt 1) {
+                if ($AllowPrerelease) {
+                    $best = $allVersions | Where-Object { 
+                        $_.Version.Major -eq ($targetMajor - 1) 
+                    } | Sort-Object -Property @{Expression={$_.Version}; Descending=$true} | Select-Object -First 1
+                } else {
+                    $best = $allVersions | Where-Object { 
+                        $_.Version.Major -eq ($targetMajor - 1) -and -not $_.IsPrerelease 
+                    } | Sort-Object -Property @{Expression={$_.Version}; Descending=$true} | Select-Object -First 1
+                }
+            }
+        }
+        
+        # If not a .NET-versioned package OR no version found with above strategy
+        # Fall back to getting the latest compatible version
+        if (-not $best) {
+            if ($AllowPrerelease) {
+                $best = $allVersions | Sort-Object -Property @{Expression={$_.Version}; Descending=$true} | Select-Object -First 1
+            } else {
+                $best = $allVersions | Where-Object { -not $_.IsPrerelease } | Sort-Object -Property @{Expression={$_.Version}; Descending=$true} | Select-Object -First 1
+            }
         }
         
         if (-not $best) {
