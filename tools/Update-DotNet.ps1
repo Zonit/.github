@@ -126,9 +126,15 @@ function Get-BestPackageVersion {
             return $null
         }
         
-        # Parse all versions
+        # Parse all versions and validate they are FULL semantic versions
         $allVersions = $versions | ForEach-Object {
             try {
+                # CRITICAL: Reject major-only versions (e.g., "4" -> reject, "4.0.0" -> OK)
+                if ($_ -match '^\d+$') {
+                    Write-Verbose "Rejecting major-only version: $_"
+                    return $null
+                }
+                
                 $v = [version]($_ -replace '-.*', '')
                 [PSCustomObject]@{
                     OriginalString = $_
@@ -197,10 +203,10 @@ function Get-BestPackageVersion {
             return $null
         }
         
-        # Ensure we return a full semantic version, never major-only
+        # CRITICAL: Double-check we're not returning major-only version
         $resultVersion = $best.OriginalString
         if ($resultVersion -match '^\d+$') {
-            Write-Warning "Rejecting major-only version '$resultVersion' for ${PackageId} - this is too broad"
+            Write-Warning "CRITICAL: Rejecting major-only version '$resultVersion' for ${PackageId} - this would break compilation"
             return $null
         }
         
@@ -232,8 +238,16 @@ if ($csprojs.Count -eq 0) {
 foreach ($proj in $csprojs) {
     try {
         [xml]$xml = Get-Content $proj.FullName
+        
+        # Ensure Project element exists
+        if (-not $xml.Project) {
+            Write-Warning "  [SKIP] $($proj.Name): Invalid project file (no <Project> element)"
+            continue
+        }
+        
         $propertyGroups = @($xml.Project.PropertyGroup)
         if ($propertyGroups.Count -eq 0) {
+            # Create PropertyGroup if it doesn't exist
             $pg = $xml.CreateElement("PropertyGroup")
             $xml.Project.AppendChild($pg) | Out-Null
             $propertyGroups = @($pg)
@@ -289,7 +303,8 @@ foreach ($proj in $csprojs) {
                         
                         if (-not $allPackagesMetadata.ContainsKey($packageId)) {
                             # Store attributes (except Include and Version)
-                            $attrs = @{}
+                            $attrs = @{
+                            }
                             foreach ($attr in $pkg.Attributes) {
                                 if ($attr.Name -notin @('Include', 'Version')) {
                                     $attrs[$attr.Name] = $attr.Value
@@ -353,14 +368,17 @@ foreach ($proj in $csprojs) {
 Write-Host "`n[4/5] Resolving package versions for each framework..." -ForegroundColor Yellow
 
 # Structure: framework -> packageId -> version
-$packageVersionsByFramework = @{}
-$unresolvedPackages = @{}
+$packageVersionsByFramework = @{
+}
+$unresolvedPackages = @{
+}
 
 foreach ($tf in $TargetFrameworks) {
     # Auto-detect if framework requires prerelease packages
     $allowPrereleaseForFramework = Test-RequiresPrerelease -TargetFramework $tf
     
-    $packageVersionsByFramework[$tf] = @{}
+    $packageVersionsByFramework[$tf] = @{
+    }
     
     Write-Host "  Resolving versions for $tf..." -ForegroundColor Cyan
     
@@ -399,13 +417,31 @@ if ($unresolvedPackages.Count -gt 0) {
 # ============================================================================
 Write-Host "`n[5/5] Creating/Updating Directory.Packages.props..." -ForegroundColor Yellow
 
-$propsFile = Get-ChildItem -Filter "Directory.Packages.props" | Select-Object -First 1
-$oldVersions = @{}
+# CRITICAL FIX: Look for Directory.Packages.props in Source/ directory (Zonit convention)
+$propsFile = $null
+$searchPaths = @("Source", ".")
+
+foreach ($searchPath in $searchPaths) {
+    if (Test-Path $searchPath) {
+        $found = Get-ChildItem -Path $searchPath -Filter "Directory.Packages.props" -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($found) {
+            $propsFile = $found
+            Write-Host "  Found existing Directory.Packages.props in: $searchPath" -ForegroundColor Cyan
+            break
+        }
+    }
+}
+
+$oldVersions = @{
+
+}
 
 if (-not $propsFile) {
-    $propsPath = "Directory.Packages.props"
+    # Create in Source/ directory if it exists, otherwise in root
+    $propsPath = if (Test-Path "Source") { "Source\Directory.Packages.props" } else { "Directory.Packages.props" }
+    
+    # CRITICAL FIX: No XML declaration - MSBuild doesn't need it
     @"
-<?xml version="1.0" encoding="utf-8"?>
 <Project>
   <PropertyGroup>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
@@ -413,7 +449,7 @@ if (-not $propsFile) {
 </Project>
 "@ | Set-Content $propsPath
     $propsFile = Get-Item $propsPath
-    Write-Host "  Created new Directory.Packages.props" -ForegroundColor Green
+    Write-Host "  Created new Directory.Packages.props at: $propsPath" -ForegroundColor Green
 } else {
     # Collect old versions for change tracking
     try {
@@ -518,6 +554,12 @@ try {
         foreach ($packageId in ($commonPackages.Keys | Sort-Object)) {
             $version = $commonPackages[$packageId]
             
+            # CRITICAL: Skip if version is invalid (null, "0", or major-only like "4")
+            if (-not $version -or $version -eq "0" -or $version -match '^\d+$') {
+                Write-Warning "    [SKIP] $packageId - invalid version: $version (would break compilation)"
+                continue
+            }
+            
             $pkgVersion = $xml.CreateElement("PackageVersion")
             $pkgVersion.SetAttribute("Include", $packageId)
             $pkgVersion.SetAttribute("Version", $version)
@@ -561,6 +603,12 @@ try {
             foreach ($packageId in ($frameworkSpecificPackages.Keys | Sort-Object)) {
                 if ($packageVersionsByFramework[$tf].ContainsKey($packageId)) {
                     $version = $packageVersionsByFramework[$tf][$packageId]
+                    
+                    # CRITICAL: Skip if version is invalid (null, "0", or major-only like "4")
+                    if (-not $version -or $version -eq "0" -or $version -match '^\d+$') {
+                        Write-Warning "    [$tf] [SKIP] $packageId - invalid version: $version (would break compilation)"
+                        continue
+                    }
                     
                     $pkgVersion = $xml.CreateElement("PackageVersion")
                     $pkgVersion.SetAttribute("Include", $packageId)
