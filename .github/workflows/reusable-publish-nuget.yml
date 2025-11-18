@@ -34,7 +34,7 @@ jobs:
           echo "NEEDS_NET9=false" >> $GITHUB_ENV
           echo "NEEDS_NET10=false" >> $GITHUB_ENV
           
-          # Detect frameworks from all projects
+          # Detect frameworks from all projects in SOURCE_DIR only
           for proj in $(find $SOURCE_DIR -name '*.csproj'); do
             echo "Analyzing project: $proj"
             
@@ -105,11 +105,19 @@ jobs:
       - name: Show installed .NET versions
         run: dotnet --list-sdks && dotnet --list-runtimes
 
-      - name: Restore all projects
-        run: dotnet restore
+      - name: Restore projects in Source directory
+        run: |
+          for proj in $(find $SOURCE_DIR -name '*.csproj'); do
+            echo "Restoring: $proj"
+            dotnet restore "$proj"
+          done
 
-      - name: Build all projects
-        run: dotnet build --configuration Release --no-restore
+      - name: Build projects in Source directory
+        run: |
+          for proj in $(find $SOURCE_DIR -name '*.csproj'); do
+            echo "Building: $proj"
+            dotnet build "$proj" --configuration Release --no-restore
+          done
 
       - name: Publish projects for each detected framework
         run: |
@@ -135,9 +143,12 @@ jobs:
             done
           done
 
-      - name: Pack all projects
+      - name: Pack projects in Source directory
         run: |
-          find $SOURCE_DIR -name '*.csproj' -exec dotnet pack {} --configuration Release --no-build --output ./nupkgs \;
+          for proj in $(find $SOURCE_DIR -name '*.csproj'); do
+            echo "Packing: $proj"
+            dotnet pack "$proj" --configuration Release --no-build --output ./nupkgs
+          done
 
       - name: Publish NuGet packages
         run: dotnet nuget push ./nupkgs/*.nupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json
